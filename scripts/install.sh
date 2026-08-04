@@ -51,7 +51,7 @@ REPO_RAW_URL="${AGENT_COMMONS_REPO:-https://raw.githubusercontent.com/dqsjqian/a
     curl -fsSL "$url" -o "$target" 2>/dev/null || true
   }
   seed_if_missing "$CENTRAL/identity/profile.md"   "$REPO_RAW_URL/docs/examples/identity-profile.template.md"
-  seed_if_missing "$CENTRAL/identity/ROUTINE.md"   "$REPO_RAW_URL/examples/identity-routine.template.md"
+  seed_if_missing "$CENTRAL/identity/ROUTINE.md"   "$REPO_RAW_URL/docs/examples/identity-routine.template.md"
   seed_if_missing "$CENTRAL/rules/universal.md"    "$REPO_RAW_URL/docs/examples/rules-universal.template.md"
   seed_if_missing "$CENTRAL/rules/public-repo.md"  "$REPO_RAW_URL/docs/examples/rules-public-repo.template.md"
   seed_if_missing "$CENTRAL/rules/file-cleanup.md" "$REPO_RAW_URL/docs/examples/rules-file-cleanup.template.md"

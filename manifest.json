@@ -3,7 +3,7 @@
   "name": "agent-commons",
   "protocol_version": "2.0",
   "skill_version": "3.0",
-  "spec_url": "https://github.com/dqsjqian/agent-commons/blob/main/SPEC.md",
+  "spec_url": "https://github.com/dqsjqian/agent-commons/blob/main/docs/SPEC.md",
   "onboarding_url": "https://github.com/dqsjqian/agent-commons/blob/main/docs/ONBOARDING.md",
   "skill_url": "https://github.com/dqsjqian/agent-commons/blob/main/SKILL.md",
   "conventions_url": "https://github.com/dqsjqian/agent-commons/blob/main/docs/CONVENTIONS.md",

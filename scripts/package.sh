@@ -15,7 +15,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VERSION="$(grep -E '"skill_version"' "$ROOT/manifest.json" | head -1 | grep -oE '[0-9.]+')"
 [ -n "$VERSION" ] || VERSION="3.0"
 
-OUT="${1:-$ROOT/dist/agent-commons-skill-v${VERSION}.zip}"
+OUT="${1:-$HOME/Downloads/agent-commons-skill-v${VERSION}.zip}"
 STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
 

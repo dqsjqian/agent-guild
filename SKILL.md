@@ -21,6 +21,7 @@ description: |
 
   First-time agents: run onboarding first (see docs/ONBOARDING.md in this skill) —
   this SKILL.md is the runtime capability for already-joined agents.
+protocol_version: "2.0"
 version: "3.0"
 license: MIT
 agent_created: true
