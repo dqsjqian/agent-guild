@@ -11,7 +11,7 @@
 # This script bootstraps ~/.agent-commons/ and prints the agent-onboarding
 # message. It does NOT touch any AI agent's home directory — agents join
 # the system on their own by reading ONBOARDING.md (one-time joining flow);
-# afterwards they use skills/agent-commons/SKILL.md as their runtime capability.
+# afterwards they use SKILL.md (repo root, installed into the central dir) as their runtime capability.
 #
 # Idempotent: re-running upgrades the protocol skeleton without touching your data.
 
@@ -38,8 +38,8 @@ REPO_RAW_URL="${AGENT_COMMONS_REPO:-https://raw.githubusercontent.com/dqsjqian/a
   # Protocol skeleton (always overwrite — controlled by this project)
   curl -fsSL "$REPO_RAW_URL/ONBOARDING.md"                         -o "$CENTRAL/ONBOARDING.md"
   curl -fsSL "$REPO_RAW_URL/CONVENTIONS.md"                        -o "$CENTRAL/CONVENTIONS.md"
-  curl -fsSL "$REPO_RAW_URL/skills/agent-commons/SKILL.md"         -o "$CENTRAL/skills/agent-commons/SKILL.md"
-  curl -fsSL "$REPO_RAW_URL/skills/agent-commons/manifest.json"    -o "$CENTRAL/skills/agent-commons/manifest.json"
+  curl -fsSL "$REPO_RAW_URL/SKILL.md"         -o "$CENTRAL/skills/agent-commons/SKILL.md"
+  curl -fsSL "$REPO_RAW_URL/manifest.json"    -o "$CENTRAL/skills/agent-commons/manifest.json"
   curl -fsSL "$REPO_RAW_URL/scripts/ac.py"                         -o "$CENTRAL/skills/agent-commons/scripts/ac.py"
   chmod +x "$CENTRAL/skills/agent-commons/scripts/ac.py" 2>/dev/null || true
 

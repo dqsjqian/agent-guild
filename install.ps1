@@ -61,8 +61,8 @@ $null = & {
 
     Download-File "$RepoRawUrl/ONBOARDING.md"                      (Join-Path $Central 'ONBOARDING.md')                          | Out-Null
     Download-File "$RepoRawUrl/CONVENTIONS.md"                     (Join-Path $Central 'CONVENTIONS.md')                         | Out-Null
-    Download-File "$RepoRawUrl/skills/agent-commons/SKILL.md"      (Join-Path $Central 'skills\agent-commons\SKILL.md')      | Out-Null
-    Download-File "$RepoRawUrl/skills/agent-commons/manifest.json" (Join-Path $Central 'skills\agent-commons\manifest.json') | Out-Null
+    Download-File "$RepoRawUrl/SKILL.md"      (Join-Path $Central 'skills\agent-commons\SKILL.md')      | Out-Null
+    Download-File "$RepoRawUrl/manifest.json" (Join-Path $Central 'skills\agent-commons\manifest.json') | Out-Null
 
     # User-owned templates (only seed if missing)
     function Seed-If-Missing {

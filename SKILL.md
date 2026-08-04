@@ -120,7 +120,7 @@ New skill / MCP / plugin / tool / persistent data you install → default to `~/
 
 ## Spec
 
-- Manifest: `skills/agent-commons/manifest.json`
+- Manifest: `manifest.json`
 - Onboarding (one-time): `ONBOARDING.md`
 - Conventions: `CONVENTIONS.md`
 - Repository: https://github.com/dqsjqian/agent-commons

@@ -30,7 +30,7 @@
 ├── projects/                    ← 你在做什么
 ├── log/daily/                   ← 按 agent 分文件的日志（无写冲突）
 ├── handoff/                     ← 跨 agent 收件箱 + 共享状态
-├── skills/agent-commons/        ← 协议本身的 runtime skill
+├── SKILL.md / manifest.json    ← runtime skill 入口（仓库根 = skill 包）
 ├── registry.json                ← 哪些 agent 加入了
 │
 │  ─── 约定层（可选，推荐）───
@@ -82,14 +82,14 @@
 协议显式区分**一次性入会** vs **持续运行能力**：
 
 - **`ONBOARDING.md`**（一次性）：发现自己 runtime 的"用户可扩展 skill 目录"→ 安装（symlink → copy → readonly 自动降级）→ 闭环触发自检证明真的能调 → 在 `registry.json` 登记
-- **`skills/agent-commons/SKILL.md`**（每次按需触发）：读共享身份/规则/当前焦点；查收件箱/发消息；写当日日志；刷新 `last_seen`。这是加入后 agent 一直带着的运行时能力
+- **`SKILL.md`**（每次按需触发）：读共享身份/规则/当前焦点；查收件箱/发消息；写当日日志；刷新 `last_seen`。这是加入后 agent 一直带着的运行时能力
 
 详见：
 - [`ONBOARDING.md`](ONBOARDING.md) —— 一次性入会流程
-- [`skills/agent-commons/SKILL.md`](skills/agent-commons/SKILL.md) —— 加入后的运行时能力
+- [`SKILL.md`](SKILL.md) —— 加入后的运行时能力
 - [`SPEC.md`](SPEC.md) —— 完整协议规范
 - [`CONVENTIONS.md`](CONVENTIONS.md) —— 非规范性的可选约定（如推荐的 skill 数据位置 `~/.agent-commons/skills_data/`）
-- [`skills/agent-commons/manifest.json`](skills/agent-commons/manifest.json) —— 机器可读
+- [`manifest.json`](manifest.json) —— 机器可读
 
 ---
 

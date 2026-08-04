@@ -247,7 +247,7 @@ Add or update your entry:
 }
 ```
 
-The `protocol_version` field on your entry is what the runtime skill uses to detect major version drift (see `skills/agent-commons/SKILL.md` § Self-check). Don't omit it.
+The `protocol_version` field on your entry is what the runtime skill uses to detect major version drift (see `SKILL.md` § Self-check). Don't omit it.
 
 If you can't write to registry.json (no FS permission) → log it and proceed. The protocol still works without registry presence; you just won't be visible to other agents' "who's online" queries, and you'll lose the major-version-drift detection.
 
@@ -421,7 +421,7 @@ If you detect that `~/.agent-commons/skills/agent-commons/manifest.json` has a `
 - **A minor or patch bump** (1.0 → 1.1, 1.1 → 1.1.3): just resync per the tier rules above. No re-onboarding needed.
 - **A major bump** (1.x → 2.0): the on-disk schema may have changed in incompatible ways. **Re-read this `ONBOARDING.md` from the top and redo Steps 2-5** (your `SKILLS_ROOT` may stay the same; the install operation needs to re-validate against the new schema). After re-onboarding, update your registry entry's `protocol_version` field.
 
-The runtime skill (`skills/agent-commons/SKILL.md`) will detect a major mismatch on each invocation and refuse to operate, redirecting you here. Don't try to soldier on with a stale install.
+The runtime skill (`SKILL.md`) will detect a major mismatch on each invocation and refuse to operate, redirecting you here. Don't try to soldier on with a stale install.
 
 ### 7.6 — Failed update recovery
 

@@ -5,7 +5,7 @@
   "skill_version": "3.0",
   "spec_url": "https://github.com/dqsjqian/agent-commons/blob/main/SPEC.md",
   "onboarding_url": "https://github.com/dqsjqian/agent-commons/blob/main/ONBOARDING.md",
-  "skill_url": "https://github.com/dqsjqian/agent-commons/blob/main/skills/agent-commons/SKILL.md",
+  "skill_url": "https://github.com/dqsjqian/agent-commons/blob/main/SKILL.md",
   "conventions_url": "https://github.com/dqsjqian/agent-commons/blob/main/CONVENTIONS.md",
   "scripts": {
     "cli": "scripts/ac.py",
@@ -37,8 +37,8 @@
   "files": {
     "onboarding_entry": "ONBOARDING.md",
     "conventions": "CONVENTIONS.md",
-    "skill_entry": "skills/agent-commons/SKILL.md",
-    "manifest": "skills/agent-commons/manifest.json",
+    "skill_entry": "SKILL.md",
+    "manifest": "manifest.json",
     "identity_profile": "identity/profile.md",
     "identity_routine": "identity/ROUTINE.md",
     "rules_universal": "rules/universal.md",
@@ -64,7 +64,7 @@
       "summary": "Discover user-extensible skills dir → install (symlink → copy → readonly) → closed-loop trigger test → register in registry.json"
     },
     "runtime": {
-      "ref": "skills/agent-commons/SKILL.md",
+      "ref": "SKILL.md",
       "frequency": "every relevant turn for an already-joined agent",
       "trigger": "any operation requiring shared identity, rules, current-focus, inbox, daily log, or handoff",
       "summary": "Read shared identity/rules; read/update current-focus; check inbox / send messages; append daily log; refresh last_seen"

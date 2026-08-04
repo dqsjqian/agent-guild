@@ -30,7 +30,7 @@
 ├── projects/                    ← What you're working on
 ├── log/daily/                   ← Per-agent daily logs (no write conflicts)
 ├── handoff/                     ← Cross-agent inbox + shared state
-├── skills/agent-commons/        ← Runtime skill of the protocol itself
+├── SKILL.md / manifest.json    ← Runtime skill entry (repo root = skill package)
 ├── registry.json                ← Which agents have joined
 │
 │  ─── Convention layer (optional, recommended) ───
@@ -82,13 +82,13 @@ If the agent can't figure it out, **the agent isn't smart enough for your workfl
 The protocol cleanly separates **one-time joining** from **ongoing capabilities**:
 
 - **`ONBOARDING.md`** (one-time): discover your runtime's user-extensible skills directory, install the skill (symlink → copy → readonly fallback), run a closed-loop trigger test to prove the runtime can actually invoke it, register in `registry.json`.
-- **`skills/agent-commons/SKILL.md`** (recurring): read shared identity / rules / current focus; check inbox / send messages; append daily logs; refresh `last_seen`. This is the runtime capability the joined agent carries forward.
+- **`SKILL.md`** (recurring): read shared identity / rules / current focus; check inbox / send messages; append daily logs; refresh `last_seen`. This is the runtime capability the joined agent carries forward.
 
 See [`ONBOARDING.md`](ONBOARDING.md) for the joining flow.
-See [`skills/agent-commons/SKILL.md`](skills/agent-commons/SKILL.md) for the runtime capability spec.
+See [`SKILL.md`](SKILL.md) for the runtime capability spec.
 See [`SPEC.md`](SPEC.md) for the full normative specification.
 See [`CONVENTIONS.md`](CONVENTIONS.md) for optional, non-normative conventions (e.g. recommended skill data location at `~/.agent-commons/skills_data/`).
-See [`skills/agent-commons/manifest.json`](skills/agent-commons/manifest.json) for the machine-readable spec.
+See [`manifest.json`](manifest.json) for the machine-readable spec.
 
 ---
 

@@ -12,7 +12,7 @@
 set -e
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-VERSION="$(grep -E '"skill_version"' "$ROOT/skills/agent-commons/manifest.json" | head -1 | grep -oE '[0-9.]+')"
+VERSION="$(grep -E '"skill_version"' "$ROOT/manifest.json" | head -1 | grep -oE '[0-9.]+')"
 [ -n "$VERSION" ] || VERSION="3.0"
 
 OUT="${1:-$ROOT/dist/agent-commons-skill-v${VERSION}.zip}"
@@ -22,8 +22,8 @@ trap 'rm -rf "$STAGE"' EXIT
 PKG="$STAGE/agent-commons"
 mkdir -p "$PKG/scripts"
 
-cp "$ROOT/skills/agent-commons/SKILL.md"     "$PKG/SKILL.md"
-cp "$ROOT/skills/agent-commons/manifest.json" "$PKG/manifest.json"
+cp "$ROOT/SKILL.md"     "$PKG/SKILL.md"
+cp "$ROOT/manifest.json" "$PKG/manifest.json"
 cp "$ROOT/ONBOARDING.md"                     "$PKG/ONBOARDING.md"
 cp "$ROOT/CONVENTIONS.md"                    "$PKG/CONVENTIONS.md"
 cp "$ROOT/LICENSE"                           "$PKG/LICENSE"
