@@ -71,13 +71,13 @@ $null = & {
             Download-File $Url $Target | Out-Null
         }
     }
-    Seed-If-Missing (Join-Path $Central 'identity\profile.md')   "$RepoRawUrl/examples/identity-profile.template.md"
-    Seed-If-Missing (Join-Path $Central 'identity\ROUTINE.md')   "$RepoRawUrl/examples/identity-routine.template.md"
-    Seed-If-Missing (Join-Path $Central 'rules\universal.md')    "$RepoRawUrl/examples/rules-universal.template.md"
-    Seed-If-Missing (Join-Path $Central 'rules\public-repo.md')  "$RepoRawUrl/examples/rules-public-repo.template.md"
-    Seed-If-Missing (Join-Path $Central 'rules\file-cleanup.md') "$RepoRawUrl/examples/rules-file-cleanup.template.md"
-    Seed-If-Missing (Join-Path $Central 'rules\safety.md')       "$RepoRawUrl/examples/rules-safety.template.md"
-    Seed-If-Missing (Join-Path $Central 'toolchain\paths.md')    "$RepoRawUrl/examples/toolchain-paths.template.md"
+    Seed-If-Missing (Join-Path $Central 'identity\profile.md')   "$RepoRawUrl/docs/examples/identity-profile.template.md"
+    Seed-If-Missing (Join-Path $Central 'identity\ROUTINE.md')   "$RepoRawUrl/docs/examples/identity-routine.template.md"
+    Seed-If-Missing (Join-Path $Central 'rules\universal.md')    "$RepoRawUrl/docs/examples/rules-universal.template.md"
+    Seed-If-Missing (Join-Path $Central 'rules\public-repo.md')  "$RepoRawUrl/docs/examples/rules-public-repo.template.md"
+    Seed-If-Missing (Join-Path $Central 'rules\file-cleanup.md') "$RepoRawUrl/docs/examples/rules-file-cleanup.template.md"
+    Seed-If-Missing (Join-Path $Central 'rules\safety.md')       "$RepoRawUrl/docs/examples/rules-safety.template.md"
+    Seed-If-Missing (Join-Path $Central 'toolchain\paths.md')    "$RepoRawUrl/docs/examples/toolchain-paths.template.md"
 
     # Initial state files
     $focusFile = Join-Path $Central 'handoff\shared-state\current-focus.md'
