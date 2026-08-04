@@ -1,4 +1,4 @@
-# Agent Commons
+# Agent Guild
 
 > A protocol that lets any sufficiently intelligent AI agent join your shared memory by simply reading one file.
 
@@ -12,14 +12,14 @@
 
 **You probably switch between multiple AI agents every day** — Claude Code, Cursor, CodeBuddy, WorkBuddy, OpenClaw, Aider, GitHub Copilot Chat… and every one of them is an isolated island. Each one has its own memory of you, none of them know what the other learned. You teach the same preferences over and over.
 
-**Agent Commons fixes that.** It's a tiny **protocol** — not a framework, not a service, not even a library — that lets multiple AI agents on your machine share a single source of truth via plain Markdown files and Unix symlinks.
+**Agent Guild fixes that.** It's a tiny **protocol** — not a framework, not a service, not even a library — that lets multiple AI agents on your machine share a single source of truth via plain Markdown files and Unix symlinks.
 
 ---
 
 ## The 30-second pitch
 
 ```
-~/.agent-commons/                ← One central directory on your machine
+~/.agent-guild/                ← One central directory on your machine
 │
 │  ─── Protocol layer (mandatory) ───
 ├── ONBOARDING.md                ← One-time joining flow for new agents
@@ -30,7 +30,7 @@
 ├── projects/                    ← What you're working on
 ├── log/daily/                   ← Per-agent daily logs (no write conflicts)
 ├── handoff/                     ← Cross-agent inbox + shared state
-├── skills/agent-commons/    ← Runtime skill installed from repo root (SKILL.md + manifest + scripts)
+├── skills/agent-guild/    ← Runtime skill installed from repo root (SKILL.md + manifest + scripts)
 ├── registry.json                ← Which agents have joined
 │
 │  ─── Convention layer (optional, recommended) ───
@@ -43,7 +43,7 @@
 Every joined agent has a symlink:
 
 ```bash
-~/.<your-agent>/skills/agent-commons → ~/.agent-commons/skills/agent-commons/
+~/.<your-agent>/skills/agent-guild → ~/.agent-guild/skills/agent-guild/
 ```
 
 That's it. **No daemon. No server. No npm install. No third-party runtime. Pure filesystem.**
@@ -59,7 +59,7 @@ That's it. **No daemon. No server. No npm install. No third-party runtime. Pure 
 | MemGPT / Letta | Long-term memory inside one agent | Doesn't span agents |
 | Mem0 | Cross-agent memory service | Needs server, REST API, vendor lock |
 | MCP | Tool/resource protocol | Not about memory |
-| **Agent Commons** | **Cross-vendor, local-first, plaintext, zero-deps** | **Requires the agent to be smart enough to read a file** |
+| **Agent Guild** | **Cross-vendor, local-first, plaintext, zero-deps** | **Requires the agent to be smart enough to read a file** |
 
 The differentiator: **we don't write adapters for each agent**. We write a single `SKILL.md` that any sufficiently intelligent LLM can read and self-onboard from. Agents that can't follow plain English instructions… don't get to join. That's the design.
 
@@ -69,7 +69,7 @@ The differentiator: **we don't write adapters for each agent**. We write a singl
 
 Tell the agent, in any language, any phrasing:
 
-> "Read `~/.agent-commons/ONBOARDING.md` and join the Agent Commons system."
+> "Read `~/.agent-guild/ONBOARDING.md` and join the Agent Guild system."
 
 That's the entire user-side workflow. No CLI to install, no configs to edit. The agent reads the file, follows the joining flow inside, and reports back.
 
@@ -87,14 +87,14 @@ The protocol cleanly separates **one-time joining** from **ongoing capabilities*
 See [`ONBOARDING.md`](ONBOARDING.md) for the joining flow.
 See [`SKILL.md`](../SKILL.md) for the runtime capability spec.
 See [`SPEC.md`](SPEC.md) for the full normative specification.
-See [`CONVENTIONS.md`](CONVENTIONS.md) for optional, non-normative conventions (e.g. recommended skill data location at `~/.agent-commons/skills_data/`).
+See [`CONVENTIONS.md`](CONVENTIONS.md) for optional, non-normative conventions (e.g. recommended skill data location at `~/.agent-guild/skills_data/`).
 See [`manifest.json`](../manifest.json) for the machine-readable spec.
 
 ---
 
 ## Single source of truth — automatic protocol updates
 
-Each joined agent's `~/.<agent>/skills/agent-commons/` is a **symlink** back to the central `~/.agent-commons/skills/agent-commons/`. When this project ships a protocol update, you update the central dir; **every agent on the user's machine sees the new version on its next session start**. No push notifications, no version checks, no hash comparison. Just filesystem semantics doing what filesystem semantics do.
+Each joined agent's `~/.<agent>/skills/agent-guild/` is a **symlink** back to the central `~/.agent-guild/skills/agent-guild/`. When this project ships a protocol update, you update the central dir; **every agent on the user's machine sees the new version on its next session start**. No push notifications, no version checks, no hash comparison. Just filesystem semantics doing what filesystem semantics do.
 
 User-owned files (`identity/`, `rules/`, `toolchain/`, etc.) are **never overwritten by upstream** — they live next to but outside the symlinked `skills/`.
 
@@ -105,26 +105,26 @@ User-owned files (`identity/`, `rules/`, `toolchain/`, etc.) are **never overwri
 ### macOS / Linux / WSL / Git Bash
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/dqsjqian/agent-commons/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/dqsjqian/agent-guild/main/scripts/install.sh | bash
 ```
 
 ### Windows (PowerShell)
 
 ```powershell
-iwr -useb https://raw.githubusercontent.com/dqsjqian/agent-commons/main/scripts/install.ps1 | iex
+iwr -useb https://raw.githubusercontent.com/dqsjqian/agent-guild/main/scripts/install.ps1 | iex
 ```
 
-The installer does exactly **one** thing: bootstrap the central directory at `~/.agent-commons/` (or `%USERPROFILE%\.agent-commons\`) with seed files, then print a bilingual one-liner you can paste into any AI agent. **It does not touch any agent's home directory.** Agents install themselves — that's the protocol.
+The installer does exactly **one** thing: bootstrap the central directory at `~/.agent-guild/` (or `%USERPROFILE%\.agent-guild\`) with seed files, then print a bilingual one-liner you can paste into any AI agent. **It does not touch any agent's home directory.** Agents install themselves — that's the protocol.
 
 ### Manual install
 
 ```bash
-git clone https://github.com/dqsjqian/agent-commons ~/.agent-commons
+git clone https://github.com/dqsjqian/agent-guild ~/.agent-guild
 ```
 
 Then tell your agent:
 
-> "Read `~/.agent-commons/ONBOARDING.md` and join Agent Commons."
+> "Read `~/.agent-guild/ONBOARDING.md` and join Agent Guild."
 
 The agent will figure out how to integrate with itself (symlink, copy, or read-only fallback — see ONBOARDING.md).
 

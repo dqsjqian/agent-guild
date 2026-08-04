@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# Agent Commons — installer (macOS / Linux / WSL / Git Bash)
+# Agent Guild — installer (macOS / Linux / WSL / Git Bash)
 #
 # Windows users: use install.ps1 instead.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/dqsjqian/agent-commons/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/dqsjqian/agent-guild/main/install.sh | bash
 # or:
 #   bash install.sh
 #
-# This script bootstraps ~/.agent-commons/ and prints the agent-onboarding
+# This script bootstraps ~/.agent-guild/ and prints the agent-onboarding
 # message. It does NOT touch any AI agent's home directory — agents join
 # the system on their own by reading ONBOARDING.md (one-time joining flow);
 # afterwards they use SKILL.md (repo root, installed into the central dir) as their runtime capability.
@@ -17,8 +17,8 @@
 
 set -e
 
-CENTRAL="$HOME/.agent-commons"
-REPO_RAW_URL="${AGENT_COMMONS_REPO:-https://raw.githubusercontent.com/dqsjqian/agent-commons/main}"
+CENTRAL="$HOME/.agent-guild"
+REPO_RAW_URL="${AGENT_GUILD_REPO:-https://raw.githubusercontent.com/dqsjqian/agent-guild/main}"
 
 # ── Silent bootstrap ───────────────────────────────────────────────
 {
@@ -33,15 +33,15 @@ REPO_RAW_URL="${AGENT_COMMONS_REPO:-https://raw.githubusercontent.com/dqsjqian/a
   #   mcp/<server>/         shared MCP server configs / local implementations
   #   plugins/<name>/       shared plugins (e.g. browser/editor extensions)
   #   tools/<name>/         shared scripts / utilities (CLI helpers, dotfiles, etc.)
-  mkdir -p "$CENTRAL"/{skills/agent-commons/scripts,skills_data,mcp,plugins,tools,identity,rules,toolchain,projects,log/daily,log/decisions,log/archive,handoff/inbox,handoff/archive,handoff/shared-state}
+  mkdir -p "$CENTRAL"/{skills/agent-guild/scripts,skills_data,mcp,plugins,tools,identity,rules,toolchain,projects,log/daily,log/decisions,log/archive,handoff/inbox,handoff/archive,handoff/shared-state}
 
   # Protocol skeleton (always overwrite — controlled by this project)
   curl -fsSL "$REPO_RAW_URL/docs/ONBOARDING.md"                         -o "$CENTRAL/ONBOARDING.md"
   curl -fsSL "$REPO_RAW_URL/docs/CONVENTIONS.md"                        -o "$CENTRAL/CONVENTIONS.md"
-  curl -fsSL "$REPO_RAW_URL/SKILL.md"         -o "$CENTRAL/skills/agent-commons/SKILL.md"
-  curl -fsSL "$REPO_RAW_URL/manifest.json"    -o "$CENTRAL/skills/agent-commons/manifest.json"
-  curl -fsSL "$REPO_RAW_URL/scripts/ac.py"                         -o "$CENTRAL/skills/agent-commons/scripts/ac.py"
-  chmod +x "$CENTRAL/skills/agent-commons/scripts/ac.py" 2>/dev/null || true
+  curl -fsSL "$REPO_RAW_URL/SKILL.md"         -o "$CENTRAL/skills/agent-guild/SKILL.md"
+  curl -fsSL "$REPO_RAW_URL/manifest.json"    -o "$CENTRAL/skills/agent-guild/manifest.json"
+  curl -fsSL "$REPO_RAW_URL/scripts/ac.py"                         -o "$CENTRAL/skills/agent-guild/scripts/ac.py"
+  chmod +x "$CENTRAL/skills/agent-guild/scripts/ac.py" 2>/dev/null || true
 
   # User-owned templates (only seed if missing — never overwrite your edits)
   seed_if_missing() {
@@ -94,5 +94,5 @@ EOF
 echo
 echo "  请复制以下内容发给你的AI（Please copy the line below to your AI agent）："
 echo
-echo "  Read ~/.agent-commons/ONBOARDING.md"
+echo "  Read ~/.agent-guild/ONBOARDING.md"
 echo

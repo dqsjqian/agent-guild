@@ -1,15 +1,15 @@
-﻿# Agent Commons — Windows installer (PowerShell)
+﻿# Agent Guild — Windows installer (PowerShell)
 #
 # Usage (one-shot):
-#   iwr -useb https://raw.githubusercontent.com/dqsjqian/agent-commons/main/install.ps1 | iex
+#   iwr -useb https://raw.githubusercontent.com/dqsjqian/agent-guild/main/install.ps1 | iex
 #
 # Or:
 #   .\install.ps1
 #
-# This script bootstraps %USERPROFILE%\.agent-commons\ and prints the
+# This script bootstraps %USERPROFILE%\.agent-guild\ and prints the
 # agent-onboarding message. It does NOT touch any AI agent's home directory —
 # agents join the system on their own by reading ONBOARDING.md (one-time
-# joining flow); afterwards they use skills\agent-commons\SKILL.md as their
+# joining flow); afterwards they use skills\agent-guild\SKILL.md as their
 # runtime capability.
 #
 # Idempotent: re-running upgrades the protocol skeleton without touching your data.
@@ -24,8 +24,8 @@ try { chcp 65001 > $null } catch {}
 
 $ErrorActionPreference = 'Stop'
 
-$Central = Join-Path $env:USERPROFILE '.agent-commons'
-$RepoRawUrl = if ($env:AGENT_COMMONS_REPO) { $env:AGENT_COMMONS_REPO } else { 'https://raw.githubusercontent.com/dqsjqian/agent-commons/main' }
+$Central = Join-Path $env:USERPROFILE '.agent-guild'
+$RepoRawUrl = if ($env:AGENT_GUILD_REPO) { $env:AGENT_GUILD_REPO } else { 'https://raw.githubusercontent.com/dqsjqian/agent-guild/main' }
 
 # ── Silent bootstrap ───────────────────────────────────────────────
 $null = & {
@@ -36,7 +36,7 @@ $null = & {
     #   plugins\<name>\       shared plugins
     #   tools\<name>\         shared scripts / utilities
     $dirs = @(
-        'skills\agent-commons','skills_data','mcp','plugins','tools',
+        'skills\agent-guild','skills_data','mcp','plugins','tools',
         'identity','rules','toolchain','projects',
         'log\daily','log\decisions','log\archive',
         'handoff\inbox','handoff\archive','handoff\shared-state'
@@ -61,8 +61,8 @@ $null = & {
 
     Download-File "$RepoRawUrl/docs/ONBOARDING.md"                      (Join-Path $Central 'ONBOARDING.md')                          | Out-Null
     Download-File "$RepoRawUrl/docs/CONVENTIONS.md"                     (Join-Path $Central 'CONVENTIONS.md')                         | Out-Null
-    Download-File "$RepoRawUrl/SKILL.md"      (Join-Path $Central 'skills\agent-commons\SKILL.md')      | Out-Null
-    Download-File "$RepoRawUrl/manifest.json" (Join-Path $Central 'skills\agent-commons\manifest.json') | Out-Null
+    Download-File "$RepoRawUrl/SKILL.md"      (Join-Path $Central 'skills\agent-guild\SKILL.md')      | Out-Null
+    Download-File "$RepoRawUrl/manifest.json" (Join-Path $Central 'skills\agent-guild\manifest.json') | Out-Null
 
     # User-owned templates (only seed if missing)
     function Seed-If-Missing {
@@ -120,5 +120,5 @@ $msg2 = $utf8.GetString([byte[]](0xEF,0xBC,0x88,0x50,0x6C,0x65,0x61,0x73,0x65,0x
 Write-Host ""
 Write-Host ("  " + $msg1 + $msg2)
 Write-Host ""
-Write-Host "  Read ~/.agent-commons/docs/ONBOARDING.md"
+Write-Host "  Read ~/.agent-guild/docs/ONBOARDING.md"
 Write-Host ""

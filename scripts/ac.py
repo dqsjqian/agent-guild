@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""ac — Agent Commons CLI (zero-dependency, stdlib only).
+"""ac — Agent Guild CLI (zero-dependency, stdlib only).
 
 Provides atomic, audited write operations for the shared state under
-~/.agent-commons/, so multiple agents can update the same files without
+~/.agent-guild/, so multiple agents can update the same files without
 corrupting them, and every write leaves an audit trail.
 
 Reads stay plain file reads (zero cost). Only writes go through here.
@@ -28,7 +28,7 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-CENTRAL = Path(os.environ.get("AGENT_COMMONS_DIR", "~/.agent-commons")).expanduser()
+CENTRAL = Path(os.environ.get("AGENT_GUILD_DIR", "~/.agent-guild")).expanduser()
 REGISTRY = CENTRAL / "registry.json"
 AUDIT = CENTRAL / "log" / "audit.jsonl"
 DAILY = CENTRAL / "log" / "daily"
@@ -88,7 +88,7 @@ def atomic_append(path: Path, content: str) -> None:
 
 def load_registry() -> dict:
     if not REGISTRY.exists():
-        return {"protocol_version": "2.0", "central_dir": "~/.agent-commons/", "agents": {}}
+        return {"protocol_version": "2.0", "central_dir": "~/.agent-guild/", "agents": {}}
     return json.loads(REGISTRY.read_text(encoding="utf-8"))
 
 

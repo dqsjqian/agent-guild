@@ -1,19 +1,19 @@
 {
-  "$schema": "https://github.com/dqsjqian/agent-commons/raw/main/spec/manifest.schema.json",
-  "name": "agent-commons",
+  "$schema": "https://github.com/dqsjqian/agent-guild/raw/main/spec/manifest.schema.json",
+  "name": "agent-guild",
   "protocol_version": "2.0",
   "skill_version": "3.0",
-  "spec_url": "https://github.com/dqsjqian/agent-commons/blob/main/docs/SPEC.md",
-  "onboarding_url": "https://github.com/dqsjqian/agent-commons/blob/main/docs/ONBOARDING.md",
-  "skill_url": "https://github.com/dqsjqian/agent-commons/blob/main/SKILL.md",
-  "conventions_url": "https://github.com/dqsjqian/agent-commons/blob/main/docs/CONVENTIONS.md",
+  "spec_url": "https://github.com/dqsjqian/agent-guild/blob/main/docs/SPEC.md",
+  "onboarding_url": "https://github.com/dqsjqian/agent-guild/blob/main/docs/ONBOARDING.md",
+  "skill_url": "https://github.com/dqsjqian/agent-guild/blob/main/SKILL.md",
+  "conventions_url": "https://github.com/dqsjqian/agent-guild/blob/main/docs/CONVENTIONS.md",
   "scripts": {
     "cli": "scripts/ac.py",
     "package": "scripts/package.sh"
   },
-  "central_dir": "~/.agent-commons/",
+  "central_dir": "~/.agent-guild/",
   "central_layout": {
-    "_note": "Top-level directory layout under ~/.agent-commons/. Protocol layer (mandatory) and convention layer (optional, per CONVENTIONS.md) co-exist as physical sibling directories.",
+    "_note": "Top-level directory layout under ~/.agent-guild/. Protocol layer (mandatory) and convention layer (optional, per CONVENTIONS.md) co-exist as physical sibling directories.",
     "protocol_layer": {
       "identity/": "user identity profile + routine (read by all agents)",
       "rules/": "shared rules (universal, public-repo, file-cleanup, safety)",
@@ -32,7 +32,7 @@
       "plugins/<name>/": "shared plugins (browser/editor/IDE extensions, etc.)",
       "tools/<name>/": "shared scripts and CLI utilities (helpers users want available across all agents)"
     },
-    "_note_convention_layer": "Agent Commons does NOT read, write, validate, or interpret anything in the convention layer. It belongs entirely to the skills/MCPs/plugins/tools that own each subdirectory. Skills following this convention get free backup/sync semantics — when the user backs up ~/.agent-commons/, all participating skills come along."
+    "_note_convention_layer": "Agent Guild does NOT read, write, validate, or interpret anything in the convention layer. It belongs entirely to the skills/MCPs/plugins/tools that own each subdirectory. Skills following this convention get free backup/sync semantics — when the user backs up ~/.agent-guild/, all participating skills come along."
   },
   "files": {
     "onboarding_entry": "docs/ONBOARDING.md",
@@ -60,7 +60,7 @@
     "onboarding": {
       "ref": "ONBOARDING.md",
       "frequency": "once per agent (or after major protocol-version bump)",
-      "trigger": "user says 'join Agent Commons' / 'read ~/.agent-commons/ONBOARDING.md' / equivalent",
+      "trigger": "user says 'join Agent Guild' / 'read ~/.agent-guild/ONBOARDING.md' / equivalent",
       "summary": "Discover user-extensible skills dir → install (symlink → copy → readonly) → closed-loop trigger test → register in registry.json"
     },
     "runtime": {
@@ -115,26 +115,26 @@
     {
       "tier": "symlink",
       "preferred": true,
-      "description": "Agent creates symlink <its-own-user-extensible-skills-dir>/agent-commons -> ~/.agent-commons/skills/agent-commons/. Auto-updates with central."
+      "description": "Agent creates symlink <its-own-user-extensible-skills-dir>/agent-guild -> ~/.agent-guild/skills/agent-guild/. Auto-updates with central."
     },
     {
       "tier": "copy",
       "fallback": true,
-      "description": "Agent copies ~/.agent-commons/skills/agent-commons/* into its OWN user-extensible skill dir. Re-sync periodically (see ONBOARDING.md Step 7)."
+      "description": "Agent copies ~/.agent-guild/skills/agent-guild/* into its OWN user-extensible skill dir. Re-sync periodically (see ONBOARDING.md Step 7)."
     },
     {
       "tier": "readonly",
       "last_resort": true,
-      "description": "Agent reads ~/.agent-commons/skills/agent-commons/SKILL.md directly each session, no local install. Won't appear in runtime's skill list but can still follow the protocol manually."
+      "description": "Agent reads ~/.agent-guild/skills/agent-guild/SKILL.md directly each session, no local install. Won't appear in runtime's skill list but can still follow the protocol manually."
     }
   ],
   "guidance_for_joined_agents": {
     "_note": "Once an agent has joined, it should treat the central directory as the recommended home for ALL user-facing persistent state, not just protocol files. This makes backup, sync, and migration trivial for the user.",
-    "where_to_persist_data": "If you (the agent OR a skill you load) need to persist data on this machine — caches, learned profiles, conversation logs, anything that should survive across sessions — RECOMMEND putting it under ~/.agent-commons/skills_data/<skill-name>/ instead of inventing a private location elsewhere. The user can then back up everything with one command.",
-    "where_to_install_mcp_servers": "If you install or configure an MCP server that should be shared with all joined agents (not bound to a single agent's runtime), RECOMMEND placing its config under ~/.agent-commons/mcp/<server-name>/.",
-    "where_to_drop_plugins": "Shared plugins (e.g. agent-agnostic browser/editor extensions) belong under ~/.agent-commons/plugins/<name>/.",
-    "where_to_drop_tools": "Shared CLI scripts / utilities the user might run from any shell session belong under ~/.agent-commons/tools/<name>/.",
-    "privacy_layering": "If a skill writes mixed-sensitivity data, split into ~/.agent-commons/skills_data/<skill>/public/ vs .../private/ so users can apply different .gitignore policies (see CONVENTIONS.md)."
+    "where_to_persist_data": "If you (the agent OR a skill you load) need to persist data on this machine — caches, learned profiles, conversation logs, anything that should survive across sessions — RECOMMEND putting it under ~/.agent-guild/skills_data/<skill-name>/ instead of inventing a private location elsewhere. The user can then back up everything with one command.",
+    "where_to_install_mcp_servers": "If you install or configure an MCP server that should be shared with all joined agents (not bound to a single agent's runtime), RECOMMEND placing its config under ~/.agent-guild/mcp/<server-name>/.",
+    "where_to_drop_plugins": "Shared plugins (e.g. agent-agnostic browser/editor extensions) belong under ~/.agent-guild/plugins/<name>/.",
+    "where_to_drop_tools": "Shared CLI scripts / utilities the user might run from any shell session belong under ~/.agent-guild/tools/<name>/.",
+    "privacy_layering": "If a skill writes mixed-sensitivity data, split into ~/.agent-guild/skills_data/<skill>/public/ vs .../private/ so users can apply different .gitignore policies (see CONVENTIONS.md)."
   },
   "principles": [
     "Local-first: all data on the user's machine, no servers",

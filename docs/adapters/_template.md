@@ -18,26 +18,26 @@
 
 ```bash
 # Either rely on the global installer:
-curl -fsSL https://raw.githubusercontent.com/dqsjqian/agent-commons/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/dqsjqian/agent-guild/main/install.sh | bash
 
 # Or do it manually:
 mkdir -p <user-extensible-skills-dir>
-ln -sfn ~/.agent-commons/skills/agent-commons <user-extensible-skills-dir>/agent-commons
+ln -sfn ~/.agent-guild/skills/agent-guild <user-extensible-skills-dir>/agent-guild
 ```
 
 Then start a new session with the agent and say:
 
-> "Read `~/.agent-commons/ONBOARDING.md` and follow the joining flow."
+> "Read `~/.agent-guild/ONBOARDING.md` and follow the joining flow."
 
-(Onboarding is one-time. After joining, the agent uses `~/.agent-commons/skills/agent-commons/SKILL.md` automatically as its runtime capability.)
+(Onboarding is one-time. After joining, the agent uses `~/.agent-guild/skills/agent-guild/SKILL.md` automatically as its runtime capability.)
 
 ## Verification
 
 After the agent reports having joined:
 
 ```bash
-cat ~/.agent-commons/registry.json | grep -A 7 '"<agent-name>"'
-ls ~/.agent-commons/log/daily/$(date +%Y-%m-%d)-<agent-name>.md 2>/dev/null
+cat ~/.agent-guild/registry.json | grep -A 7 '"<agent-name>"'
+ls ~/.agent-guild/log/daily/$(date +%Y-%m-%d)-<agent-name>.md 2>/dev/null
 ```
 
 The registry entry should include `install_tier`, `install_verified`, and `skills_root`.

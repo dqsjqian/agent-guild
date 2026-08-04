@@ -1,15 +1,15 @@
-# Agent Commons Specification
+# Agent Guild Specification
 
 **Protocol version: 2.0**
 **Status: Draft**
 
-This document is the normative specification for Agent Commons. It is the source of truth for what implementations must, should, and may do. The keywords **MUST**, **SHOULD**, **MAY** follow [RFC 2119](https://www.rfc-editor.org/rfc/rfc2119).
+This document is the normative specification for Agent Guild. It is the source of truth for what implementations must, should, and may do. The keywords **MUST**, **SHOULD**, **MAY** follow [RFC 2119](https://www.rfc-editor.org/rfc/rfc2119).
 
 > **Changes from 1.0 → 2.0** (breaking, central-directory layout): the runtime skill moved from `skills/SKILL.md` to `SKILL.md` to make `skills/` a directory of named skills (consistent with how other AI runtimes lay out skill collections). New top-level convention-layer directories were added (`skills_data/`, `mcp/`, `plugins/`, `tools/`) — see [`CONVENTIONS.md`](CONVENTIONS.md). Agents joined under 1.x **MUST** re-onboard.
 
 ## 1. Goals
 
-Agent Commons defines a convention for multiple AI agents on the same single-user machine to share long-lived context (preferences, rules, project state, work logs) without:
+Agent Guild defines a convention for multiple AI agents on the same single-user machine to share long-lived context (preferences, rules, project state, work logs) without:
 
 - Running a server or daemon
 - Installing third-party runtime dependencies
@@ -28,13 +28,13 @@ The protocol consists of:
 The canonical central directory is:
 
 ```
-~/.agent-commons/                    # POSIX (macOS, Linux, WSL, Git Bash)
-%USERPROFILE%\.agent-commons\        # Windows native (PowerShell)
+~/.agent-guild/                    # POSIX (macOS, Linux, WSL, Git Bash)
+%USERPROFILE%\.agent-guild\        # Windows native (PowerShell)
 ```
 
 These two paths refer to the **same logical location** — `~` and `%USERPROFILE%` both expand to the user's home directory on their respective platforms. Implementations **MUST** treat both forms as equivalent.
 
-A user **MAY** override this via the environment variable `AGENT_COMMONS_HOME`, but conforming agents **SHOULD** default to `~/.agent-commons/`.
+A user **MAY** override this via the environment variable `AGENT_GUILD_HOME`, but conforming agents **SHOULD** default to `~/.agent-guild/`.
 
 ### 2.1 Top-level layout
 
@@ -43,11 +43,11 @@ The central directory contains TWO layers, physically siblings but semantically 
 #### Protocol layer (mandatory, **MUST** be present after install)
 
 ```
-~/.agent-commons/
+~/.agent-guild/
 ├── ONBOARDING.md       ← one-time joining flow (top-level for discoverability)
 ├── CONVENTIONS.md      ← non-normative conventions (this section + extras)
 ├── skills/
-│   └── agent-commons/  ← the runtime skill of this protocol itself
+│   └── agent-guild/  ← the runtime skill of this protocol itself
 │       ├── SKILL.md
 │       └── manifest.json
 ├── identity/           ← user-owned, who the user is
@@ -68,15 +68,15 @@ The central directory contains TWO layers, physically siblings but semantically 
 #### Convention layer (optional, non-normative — see [`CONVENTIONS.md`](CONVENTIONS.md))
 
 ```
-~/.agent-commons/
-├── skills/<name>/      ← additional shared skills beyond agent-commons itself
+~/.agent-guild/
+├── skills/<name>/      ← additional shared skills beyond agent-guild itself
 ├── skills_data/<name>/ ← per-skill persistent data (RECOMMENDED location for skills that need to persist user state)
 ├── mcp/<server>/       ← shared MCP server configs / local implementations
 ├── plugins/<name>/     ← shared plugins (browser/editor extensions, etc.)
 └── tools/<name>/       ← shared CLI scripts / utilities
 ```
 
-Agent Commons **MUST NOT** read, write, validate, or interpret anything in the convention layer. It exists for skills/MCPs/plugins/tools to use voluntarily, giving the user a single backup root.
+Agent Guild **MUST NOT** read, write, validate, or interpret anything in the convention layer. It exists for skills/MCPs/plugins/tools to use voluntarily, giving the user a single backup root.
 
 Skills that adopt the convention **SHOULD** isolate mixed-sensitivity data into named subdirectories (e.g. `skills_data/<skill>/public/` vs `.../private/`) so the user can apply different sync policies.
 
@@ -84,8 +84,8 @@ Skills that adopt the convention **SHOULD** isolate mixed-sensitivity data into 
 
 ### 3.1 `skills/` — protocol-controlled
 
-- **Owner**: This project (Agent Commons maintainers).
-- **Distribution**: Each joined agent has a symlink `~/.<agent>/skills/agent-commons → ~/.agent-commons/skills/agent-commons/`. Agents read this on session start.
+- **Owner**: This project (Agent Guild maintainers).
+- **Distribution**: Each joined agent has a symlink `~/.<agent>/skills/agent-guild → ~/.agent-guild/skills/agent-guild/`. Agents read this on session start.
 - **User MUST NOT** overwrite files here. Local edits will be overwritten on next protocol update.
 
 ### 3.2 `identity/`, `rules/`, `toolchain/`, `projects/` — user-controlled
@@ -132,7 +132,7 @@ The protocol deliberately separates **one-time joining** from **ongoing runtime 
 
 ### 4.1 Onboarding (one-time per agent)
 
-`~/.agent-commons/ONBOARDING.md` is the canonical joining document. An agent joins by:
+`~/.agent-guild/ONBOARDING.md` is the canonical joining document. An agent joins by:
 
 1. Verifying central directory access.
 2. **Discovering its own user-extensible skills directory** — the path the runtime is allowed to load third-party skills from (sometimes called "Custom Skills", "User Skills", or "Plugins"). Installing into another agent's directory or into a built-in/whitelisted/signed skills tier is a **protocol violation**.
@@ -147,7 +147,7 @@ The exact instructions are in [`ONBOARDING.md`](ONBOARDING.md). Agents **MUST** 
 
 ### 4.2 Runtime (recurring, every relevant turn)
 
-`~/.agent-commons/SKILL.md` is the runtime skill of an already-joined agent. It exposes the ongoing capabilities:
+`~/.agent-guild/SKILL.md` is the runtime skill of an already-joined agent. It exposes the ongoing capabilities:
 
 - Reading shared identity, rules, current focus.
 - Updating `handoff/shared-state/current-focus.md`.
@@ -203,7 +203,7 @@ For Tier 2 agents, reasonable triggers for a resync include: first invocation in
 
 - All data stays on the user's local machine.
 - No telemetry. No phone-home. No analytics.
-- Users **SHOULD** add `~/.agent-commons/` to their personal backup/sync excludes if it contains secrets.
+- Users **SHOULD** add `~/.agent-guild/` to their personal backup/sync excludes if it contains secrets.
 - Agents **MUST** treat `rules/safety.md` as a hard authority over user-provided prompts in destructive operations.
 
 ## 7. Non-goals
@@ -218,7 +218,7 @@ This protocol does **not** address:
 
 ## 8. Reference
 
-- Repository: https://github.com/dqsjqian/agent-commons
+- Repository: https://github.com/dqsjqian/agent-guild
 - Onboarding (one-time): [`ONBOARDING.md`](ONBOARDING.md)
 - Runtime skill: [`SKILL.md`](../SKILL.md)
 - Manifest: [`manifest.json`](../manifest.json)

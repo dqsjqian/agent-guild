@@ -1,4 +1,4 @@
-# Agent Commons
+# Agent Guild
 
 > 一个协议——让任何足够聪明的 AI agent 只需读一个文件，就能加入你的共享记忆。
 
@@ -12,14 +12,14 @@
 
 **你大概率每天都在多个 AI agent 之间切换** —— Claude Code、Cursor、CodeBuddy、WorkBuddy、OpenClaw、Aider、GitHub Copilot Chat……每一个都是孤岛。每一个都各自有它对你的记忆，谁也不知道别人学到了什么。同样的偏好你要反复教。
 
-**Agent Commons 终结这件事。** 它是一个**协议**——不是框架、不是服务、甚至不是库——让你机器上的多个 AI agent 通过纯 Markdown 文件 + Unix 软链共享一份记忆真相源。
+**Agent Guild 终结这件事。** 它是一个**协议**——不是框架、不是服务、甚至不是库——让你机器上的多个 AI agent 通过纯 Markdown 文件 + Unix 软链共享一份记忆真相源。
 
 ---
 
 ## 30 秒理解
 
 ```
-~/.agent-commons/                ← 你机器上的中央目录
+~/.agent-guild/                ← 你机器上的中央目录
 │
 │  ─── 协议层（强制）───
 ├── ONBOARDING.md                ← 新 agent 一次性入会流程
@@ -30,7 +30,7 @@
 ├── projects/                    ← 你在做什么
 ├── log/daily/                   ← 按 agent 分文件的日志（无写冲突）
 ├── handoff/                     ← 跨 agent 收件箱 + 共享状态
-├── skills/agent-commons/    ← 从仓库根安装的 runtime skill（SKILL.md + manifest + scripts）
+├── skills/agent-guild/    ← 从仓库根安装的 runtime skill（SKILL.md + manifest + scripts）
 ├── registry.json                ← 哪些 agent 加入了
 │
 │  ─── 约定层（可选，推荐）───
@@ -43,7 +43,7 @@
 每个加入的 agent 都有一个软链：
 
 ```bash
-~/.<your-agent>/skills/agent-commons → ~/.agent-commons/skills/agent-commons/
+~/.<your-agent>/skills/agent-guild → ~/.agent-guild/skills/agent-guild/
 ```
 
 就这。**没有 daemon。没有服务器。没有 npm install。没有第三方运行时。纯文件系统。**
@@ -59,7 +59,7 @@
 | MemGPT / Letta | 单 agent 内部长期记忆 | 不跨 agent |
 | Mem0 | 跨 agent 的记忆服务 | 需要服务化部署、REST API、绑死供应商 |
 | MCP | 工具/资源协议 | 不是记忆方案 |
-| **Agent Commons** | **跨厂商、本地优先、纯文本、零依赖** | **要求 agent 智力够读懂一份文件** |
+| **Agent Guild** | **跨厂商、本地优先、纯文本、零依赖** | **要求 agent 智力够读懂一份文件** |
 
 差异化的关键：**我们不为每个 agent 写适配器**。我们写**一份** `SKILL.md`，任何足够聪明的 LLM 都能读懂并自我接入。读不懂的 agent……不配加入。这是设计本身。
 
@@ -69,7 +69,7 @@
 
 对 agent 说一句（任何语言、任何措辞）：
 
-> "请读 `~/.agent-commons/ONBOARDING.md` 加入这个体系。"
+> "请读 `~/.agent-guild/ONBOARDING.md` 加入这个体系。"
 
 就这一句话——这就是用户侧全部工作流。不需要装 CLI，不需要改配置。Agent 自己读这个文件，按里面的入会流程完成接入并报告。
 
@@ -88,14 +88,14 @@
 - [`ONBOARDING.md`](ONBOARDING.md) —— 一次性入会流程
 - [`SKILL.md`](../SKILL.md) —— 加入后的运行时能力
 - [`SPEC.md`](SPEC.md) —— 完整协议规范
-- [`CONVENTIONS.md`](CONVENTIONS.md) —— 非规范性的可选约定（如推荐的 skill 数据位置 `~/.agent-commons/skills_data/`）
+- [`CONVENTIONS.md`](CONVENTIONS.md) —— 非规范性的可选约定（如推荐的 skill 数据位置 `~/.agent-guild/skills_data/`）
 - [`manifest.json`](../manifest.json) —— 机器可读
 
 ---
 
 ## 单一真相源 + 自动协议升级
 
-每个加入 agent 的 `~/.<agent>/skills/agent-commons/` 是一条**软链**指回中央 `~/.agent-commons/skills/agent-commons/`。当本项目发布协议升级，你只更新中央目录，**用户机器上每个 agent 下次会话启动就看到新版本**。零推送、零版本检查、零 hash 比对。文件系统语义就这么干净利落。
+每个加入 agent 的 `~/.<agent>/skills/agent-guild/` 是一条**软链**指回中央 `~/.agent-guild/skills/agent-guild/`。当本项目发布协议升级，你只更新中央目录，**用户机器上每个 agent 下次会话启动就看到新版本**。零推送、零版本检查、零 hash 比对。文件系统语义就这么干净利落。
 
 用户自己的内容（`identity/` `rules/` `toolchain/` 等）**从不会被上游覆盖** —— 它们存在于软链外的同级目录，跟协议骨架物理隔离。
 
@@ -106,26 +106,26 @@
 ### macOS / Linux / WSL / Git Bash
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/dqsjqian/agent-commons/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/dqsjqian/agent-guild/main/scripts/install.sh | bash
 ```
 
 ### Windows（PowerShell）
 
 ```powershell
-iwr -useb https://raw.githubusercontent.com/dqsjqian/agent-commons/main/scripts/install.ps1 | iex
+iwr -useb https://raw.githubusercontent.com/dqsjqian/agent-guild/main/scripts/install.ps1 | iex
 ```
 
-安装器只做**一件事**：在 `~/.agent-commons/`（Windows 上是 `%USERPROFILE%\.agent-commons\`）建中央目录 + seed 模板 + 末尾打印一条双语口令让你复制给 agent。**它不会动任何 agent 的 home 目录。** Agent 自己负责接入——这就是协议。
+安装器只做**一件事**：在 `~/.agent-guild/`（Windows 上是 `%USERPROFILE%\.agent-guild\`）建中央目录 + seed 模板 + 末尾打印一条双语口令让你复制给 agent。**它不会动任何 agent 的 home 目录。** Agent 自己负责接入——这就是协议。
 
 ### 手动安装
 
 ```bash
-git clone https://github.com/dqsjqian/agent-commons ~/.agent-commons
+git clone https://github.com/dqsjqian/agent-guild ~/.agent-guild
 ```
 
 然后对你的 agent 说：
 
-> "请阅读 `~/.agent-commons/ONBOARDING.md` 加入 Agent Commons。"
+> "请阅读 `~/.agent-guild/ONBOARDING.md` 加入 Agent Guild。"
 
 Agent 会自己想办法接入（软链、拷贝、或者只读 fallback——具体见 ONBOARDING.md）。
 
@@ -144,9 +144,9 @@ Agent 会自己想办法接入（软链、拷贝、或者只读 fallback——�
 ### 升级（已经装过）
 
 ```bash
-cd ~/.agent-commons && git pull   # （如果通过 git clone 装的）
+cd ~/.agent-guild && git pull   # （如果通过 git clone 装的）
 # 或重新跑：
-curl -fsSL https://raw.githubusercontent.com/dqsjqian/agent-commons/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/dqsjqian/agent-guild/main/scripts/install.sh | bash
 ```
 
 升级**永远不会**覆盖你的 `identity/` `rules/` `toolchain/`。只会更新协议骨架（`skills/`）。
@@ -155,7 +155,7 @@ curl -fsSL https://raw.githubusercontent.com/dqsjqian/agent-commons/main/scripts
 
 ## 多设备 / 备份
 
-如果你有多台机器或换机，把整个 `~/.agent-commons/` 用 rsync / 私有 git 仓库 / iCloud Drive 备份即可。**注意不要把它推到公开仓库**——里面是你的私人记忆。
+如果你有多台机器或换机，把整个 `~/.agent-guild/` 用 rsync / 私有 git 仓库 / iCloud Drive 备份即可。**注意不要把它推到公开仓库**——里面是你的私人记忆。
 
 ---
 

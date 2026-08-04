@@ -6,7 +6,7 @@
 
 | Path | Purpose |
 |---|---|
-| `~/.agent-commons/` | Cross-agent shared memory hub (this protocol) |
+| `~/.agent-guild/` | Cross-agent shared memory hub (this protocol) |
 | `~/.skills_data/` *(optional)* | Skill runtime data root, if you use skill-based agents |
 
 ## Agent home pattern
@@ -14,7 +14,7 @@
 | Path | Meaning |
 |---|---|
 | `~/.<agent-name>/` | Each agent's private home |
-| `~/.<agent-name>/skills/agent-commons/` | Symlink to `~/.agent-commons/skills/` (joining symbol) |
+| `~/.<agent-name>/skills/agent-guild/` | Symlink to `~/.agent-guild/skills/` (joining symbol) |
 | `~/.<agent-name>/MEMORY.md.local` *(optional)* | Agent's private preferences, NOT shared |
 
 ## Project workspaces (example)

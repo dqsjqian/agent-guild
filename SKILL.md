@@ -1,7 +1,7 @@
 ---
-name: agent-commons
+name: agent-guild
 description: |
-  Agent Commons — a local-first, cross-agent shared memory protocol.
+  智能体协会（agent-guild）— a local-first, cross-agent shared memory protocol.
   Any AI agent (WorkBuddy / Claude / CodeBuddy / OpenClaw / Marvis / ...) can
   join this system to share one user identity, obey one set of rules, and
   coordinate handoffs — no servers, plaintext Markdown + JSON only.
@@ -11,13 +11,13 @@ description: |
   - check inbox for messages from other agents, send handoff messages
   - append today's per-agent daily log
   - update current-focus and registry last_seen (atomic + audited via `ac`)
-  - know where to persist shared data (~/.agent-commons/skills_data/ ...)
+  - know where to persist shared data (~/.agent-guild/skills_data/ ...)
 
-  Triggers: "read shared identity", "read agent commons rules", "what's the
-  current focus", "check my inbox", "log this to agent commons", "hand off to
-  <other-agent>", "where do I save this", "join agent commons",
+  Triggers: "read shared identity", "read agent guild rules", "what's the
+  current focus", "check my inbox", "log this to agent guild", "hand off to
+  <other-agent>", "where do I save this", "加入智能体协会",
   "读共享身份", "读共享规则", "当前焦点", "检查收件箱", "记到共享日志",
-  "交接给 <其他 agent>", "数据存哪", "加入 agent commons", any equivalent.
+  "交接给 <其他 agent>", "数据存哪", "加入智能体协会", any equivalent.
 
   First-time agents: run onboarding first (see docs/ONBOARDING.md in this skill) —
   this SKILL.md is the runtime capability for already-joined agents.
@@ -27,15 +27,15 @@ license: MIT
 agent_created: true
 ---
 
-# Agent Commons — Runtime Skill
+# Agent Guild — Runtime Skill
 
 > Local-first cross-agent shared memory. Join once, share identity/rules/focus
-> across every agent on this machine. Data lives at `~/.agent-commons/`
+> across every agent on this machine. Data lives at `~/.agent-guild/`
 > (plaintext, yours, never uploaded).
 
 ## Quick start (for an agent that has NOT joined yet)
 
-1. Run the onboarding flow: `~/.agent-commons/ONBOARDING.md` (or this skill's
+1. Run the onboarding flow: `~/.agent-guild/ONBOARDING.md` (or this skill's
    `docs/ONBOARDING.md`) — discover your runtime's user-extensible skills dir,
    install this skill (symlink → copy → readonly), run the closed-loop trigger
    test, register yourself in `registry.json`.
@@ -45,9 +45,9 @@ agent_created: true
 
 ```bash
 # 1. registered?
-grep -q '"<your-agent-name>"' ~/.agent-commons/registry.json && echo registered || echo not_registered
+grep -q '"<your-agent-name>"' ~/.agent-guild/registry.json && echo registered || echo not_registered
 # 2. protocol version compatible?
-grep -E '"protocol_version"' ~/.agent-commons/skills/agent-commons/manifest.json | head -1
+grep -E '"protocol_version"' ~/.agent-guild/skills/agent-guild/manifest.json | head -1
 ```
 Not registered → run onboarding first. Central major version > yours → re-run
 onboarding from the top.
@@ -75,15 +75,15 @@ If the CLI is unavailable, fall back to the manual file operations below
 
 | File | Purpose |
 |---|---|
-| `~/.agent-commons/identity/profile.md` | Who the user is |
-| `~/.agent-commons/identity/ROUTINE.md` | Daily schedule / routines |
-| `~/.agent-commons/rules/universal.md` | **Mandatory commandments** — highest priority |
-| `~/.agent-commons/rules/public-repo.md` | Public-repo hard rules |
-| `~/.agent-commons/rules/file-cleanup.md` | File deletion preferences |
-| `~/.agent-commons/rules/safety.md` | Safety guardrails |
-| `~/.agent-commons/projects/active.md` | What the user is working on |
-| `~/.agent-commons/handoff/shared-state/current-focus.md` | What any agent is focused on now |
-| `~/.agent-commons/toolchain/*.md` | Tool-specific config — read on demand |
+| `~/.agent-guild/identity/profile.md` | Who the user is |
+| `~/.agent-guild/identity/ROUTINE.md` | Daily schedule / routines |
+| `~/.agent-guild/rules/universal.md` | **Mandatory commandments** — highest priority |
+| `~/.agent-guild/rules/public-repo.md` | Public-repo hard rules |
+| `~/.agent-guild/rules/file-cleanup.md` | File deletion preferences |
+| `~/.agent-guild/rules/safety.md` | Safety guardrails |
+| `~/.agent-guild/projects/active.md` | What the user is working on |
+| `~/.agent-guild/handoff/shared-state/current-focus.md` | What any agent is focused on now |
+| `~/.agent-guild/toolchain/*.md` | Tool-specific config — read on demand |
 
 Read on demand; don't slurp everything every turn.
 
@@ -95,13 +95,13 @@ Never rewrite history other agents wrote.
 
 ## Capability 3 — Check inbox / send messages
 
-Inbox: `~/.agent-commons/handoff/inbox/`.
-- Receive: `ls ~/.agent-commons/handoff/inbox/ | grep "to-<your-agent-name>-"`, read, act, then `mv` to `handoff/archive/`.
+Inbox: `~/.agent-guild/handoff/inbox/`.
+- Receive: `ls ~/.agent-guild/handoff/inbox/ | grep "to-<your-agent-name>-"`, read, act, then `mv` to `handoff/archive/`.
 - Send: `from-<src>-to-<dst>-<topic>.md` — write for a recipient with no context (what you did, what's left, where artifacts are).
 
 ## Capability 4 — Daily log
 
-After **substantive work** (built/fixed/decided/learned a lasting fact), append to `~/.agent-commons/log/daily/YYYY-MM-DD-<your-agent-name>.md` — per-agent file, append-only. **Skip** greetings / lookups / short Q&A.
+After **substantive work** (built/fixed/decided/learned a lasting fact), append to `~/.agent-guild/log/daily/YYYY-MM-DD-<your-agent-name>.md` — per-agent file, append-only. **Skip** greetings / lookups / short Q&A.
 
 Good entry: `## <title>` + What / Why / Result / Cross-agent note (if others need to know).
 
@@ -111,7 +111,7 @@ Once per session, update your entry's `last_seen` (prefer `ac last-seen`, fallba
 
 ## Capability 6 — Where to persist shared data
 
-New skill / MCP / plugin / tool / persistent data you install → default to `~/.agent-commons/{skills,skills_data,mcp,plugins,tools}/<name>/`, not a private path. The user backs up the whole `~/.agent-commons/` with one command.
+New skill / MCP / plugin / tool / persistent data you install → default to `~/.agent-guild/{skills,skills_data,mcp,plugins,tools}/<name>/`, not a private path. The user backs up the whole `~/.agent-guild/` with one command.
 
 ## Failure modes
 
@@ -124,5 +124,5 @@ New skill / MCP / plugin / tool / persistent data you install → default to `~/
 - Manifest: `manifest.json`
 - Onboarding (one-time): `docs/ONBOARDING.md`
 - Conventions: `docs/CONVENTIONS.md`
-- Repository: https://github.com/dqsjqian/agent-commons
+- Repository: https://github.com/dqsjqian/agent-guild
 - License: MIT
