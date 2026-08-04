@@ -1,218 +1,127 @@
 ---
 name: agent-commons
-protocol_version: "2.0"
 description: |
-  Agent Commons — runtime capabilities for an AI agent that has already joined
-  the local cross-agent shared memory system at ~/.agent-commons/. Provides:
-  read shared user identity, rules, and routines; read/update the cross-agent
-  current-focus state; check the inbox for messages from other agents; append
-  to today's per-agent daily log; send a message to another agent's inbox.
-  Also recommends ~/.agent-commons/skills_data/, mcp/, plugins/, tools/ as
-  shared locations for cross-agent persistent state.
-  Triggers on phrases like:
-  "read shared identity", "read agent commons rules", "what's the current focus",
-  "check my inbox", "log this to agent commons", "hand off to <other-agent>",
-  "where do I save this", "where to put skill data",
+  Agent Commons — a local-first, cross-agent shared memory protocol.
+  Any AI agent (WorkBuddy / Claude / CodeBuddy / OpenClaw / Marvis / ...) can
+  join this system to share one user identity, obey one set of rules, and
+  coordinate handoffs — no servers, plaintext Markdown + JSON only.
+
+  What this skill gives a joined agent:
+  - read shared user identity / rules / routines / current focus
+  - check inbox for messages from other agents, send handoff messages
+  - append today's per-agent daily log
+  - update current-focus and registry last_seen (atomic + audited via `ac`)
+  - know where to persist shared data (~/.agent-commons/skills_data/ ...)
+
+  Triggers: "read shared identity", "read agent commons rules", "what's the
+  current focus", "check my inbox", "log this to agent commons", "hand off to
+  <other-agent>", "where do I save this", "join agent commons",
   "读共享身份", "读共享规则", "当前焦点", "检查收件箱", "记到共享日志",
-  "交接给 <其他 agent>", "数据存哪", any equivalent.
-  NOTE: this is the RUNTIME skill, not the joining flow. If the agent has not
-  yet joined, redirect to ~/.agent-commons/ONBOARDING.md instead.
+  "交接给 <其他 agent>", "数据存哪", "加入 agent commons", any equivalent.
+
+  First-time agents: run onboarding first (see ONBOARDING.md in this skill) —
+  this SKILL.md is the runtime capability for already-joined agents.
+version: "3.0"
+license: MIT
+agent_created: true
 ---
 
 # Agent Commons — Runtime Skill
 
-> This skill is for agents **already joined** to Agent Commons. It provides ongoing capabilities — reading shared context, writing logs, coordinating handoffs.
->
-> **Not joined yet?** Stop here and read `~/.agent-commons/ONBOARDING.md` first. That file contains the one-time install / verify / register flow. Do not try to onboard from this skill — they are deliberately decoupled.
+> Local-first cross-agent shared memory. Join once, share identity/rules/focus
+> across every agent on this machine. Data lives at `~/.agent-commons/`
+> (plaintext, yours, never uploaded).
 
-## Self-check on first invocation (each session, before doing real work)
+## Quick start (for an agent that has NOT joined yet)
 
-Run these three checks. Cheap, fast, mandatory.
+1. Run the onboarding flow: `~/.agent-commons/ONBOARDING.md` (or this skill's
+   `ONBOARDING.md`) — discover your runtime's user-extensible skills dir,
+   install this skill (symlink → copy → readonly), run the closed-loop trigger
+   test, register yourself in `registry.json`.
+2. Then come back here — this file is your everyday capability.
 
-### 1. Am I registered?
-
-```bash
-grep -q "\"<your-agent-name>\"" ~/.agent-commons/registry.json && echo registered || echo not_registered
-```
-
-- **registered** → continue.
-- **not_registered** → tell the user: *"I'm being asked to use the Agent Commons runtime skill, but I'm not registered in the central registry. I should run onboarding first — pointing me at `~/.agent-commons/ONBOARDING.md`?"* and stop.
-
-### 2. Is the protocol version compatible?
-
-Read `~/.agent-commons/skills/agent-commons/manifest.json` and compare its `protocol_version` to the version recorded on your registry entry at join time:
+## Self-check (each session, before real work)
 
 ```bash
-central_ver=$(grep -E '"protocol_version"' ~/.agent-commons/skills/agent-commons/manifest.json | head -1)
-my_ver=$(grep -A4 "\"<your-agent-name>\"" ~/.agent-commons/registry.json | grep protocol_version)
+# 1. registered?
+grep -q '"<your-agent-name>"' ~/.agent-commons/registry.json && echo registered || echo not_registered
+# 2. protocol version compatible?
+grep -E '"protocol_version"' ~/.agent-commons/skills/agent-commons/manifest.json | head -1
 ```
+Not registered → run onboarding first. Central major version > yours → re-run
+onboarding from the top.
 
-- **Same major** (e.g. both `1.x`) → continue. (A minor or patch bump is backward compatible.)
-- **Central has higher major** (e.g. you joined under `1.x`, central is `2.0`) → **stop and re-run `~/.agent-commons/ONBOARDING.md` from the top**. The on-disk schema may have changed in incompatible ways. Tell the user *"Agent Commons protocol bumped to a major version since I joined. Re-running onboarding."*
+## Recommended: use the `ac` CLI for all writes
 
-### 3. Is my install up to date? (Tier 2 only)
-
-Tier 1 (symlink) and Tier 3 (readonly) always read live — skip this check.
-
-If you installed via Tier 2 (copy), verify your snapshot isn't stale:
+Writes to shared files are atomic + audited when done through the CLI
+(zero-dependency Python, stdlib only). Reads stay plain file reads.
 
 ```bash
-# Compare central manifest mtime vs your snapshot's
-[ ~/.agent-commons/skills/agent-commons/manifest.json -nt "$SKILLS_ROOT/agent-commons/manifest.json" ] && echo stale || echo fresh
+python3 <skill_dir>/scripts/ac.py status          # who is registered
+python3 <skill_dir>/scripts/ac.py register <agent> <home> <tier>   # join (tier: symlink|copy|readonly)
+python3 <skill_dir>/scripts/ac.py last-seen <agent>                # refresh presence
+echo "<body>" | python3 <skill_dir>/scripts/ac.py send <dst> <topic>   # handoff message
+echo "<body>" | python3 <skill_dir>/scripts/ac.py log <agent> "<title>" # daily log
+echo "<body>" | python3 <skill_dir>/scripts/ac.py focus <agent> "<title>" # update current-focus
+python3 <skill_dir>/scripts/ac.py audit           # audit trail of shared writes
+python3 <skill_dir>/scripts/ac.py prune 30        # list idle agents
 ```
 
-If **stale**, mirror-resync per ONBOARDING.md Step 7.2:
-
-```bash
-rsync -a --delete ~/.agent-commons/skills/agent-commons/ "$SKILLS_ROOT/agent-commons/"
-# or pure-shell:
-TMP=$(mktemp -d); cp -R ~/.agent-commons/skills/agent-commons/. "$TMP/" && rm -rf "$SKILLS_ROOT/agent-commons" && mv "$TMP" "$SKILLS_ROOT/agent-commons"
-```
-
-**After resyncing, re-run the trigger self-test from ONBOARDING.md Step 4.B** — schema changes can break the runtime's view of the skill even when the file exists. If trigger now fails, walk down the tier ladder (Step 4.C). Don't keep using a skill the runtime can no longer parse.
-
-Trigger this resync **at most once per session per day** — not every turn. A reasonable heuristic: cache a marker file `$SKILLS_ROOT/agent-commons/.last-sync-check` with today's date, skip the check if it matches.
-
----
-
-## Path notation
-
-All paths use POSIX style (`~/.agent-commons/...`). On Windows native (PowerShell), translate `~` to `$env:USERPROFILE` and `/` to `\`. Same files, different syntax.
-
----
+If the CLI is unavailable, fall back to the manual file operations below
+(Edit in place, never Write-overwrite a shared file).
 
 ## Capability 1 — Read shared user context
-
-The user's cross-agent context lives at:
 
 | File | Purpose |
 |---|---|
 | `~/.agent-commons/identity/profile.md` | Who the user is |
 | `~/.agent-commons/identity/ROUTINE.md` | Daily schedule / routines |
-| `~/.agent-commons/rules/universal.md` | **Mandatory commandments** — highest priority, overrides everything else |
+| `~/.agent-commons/rules/universal.md` | **Mandatory commandments** — highest priority |
 | `~/.agent-commons/rules/public-repo.md` | Public-repo hard rules |
 | `~/.agent-commons/rules/file-cleanup.md` | File deletion preferences |
 | `~/.agent-commons/rules/safety.md` | Safety guardrails |
 | `~/.agent-commons/projects/active.md` | What the user is working on |
-| `~/.agent-commons/handoff/shared-state/current-focus.md` | What any agent is currently focused on |
+| `~/.agent-commons/handoff/shared-state/current-focus.md` | What any agent is focused on now |
 | `~/.agent-commons/toolchain/*.md` | Tool-specific config — read on demand |
 
-**Read on demand** — don't slurp everything every turn. The rules and identity files are stable; cache mentally for the session. The current-focus and active.md change frequently; re-read when it matters.
+Read on demand; don't slurp everything every turn.
 
----
+## Capability 2 — Update current-focus
 
-## Capability 2 — Update cross-agent shared state
-
-`~/.agent-commons/handoff/shared-state/current-focus.md` is the collaborative "what is being worked on right now" board.
-
-When you start or finish a major task, **update this file in place** with `Edit`, not `Write`. Other agents read it to know what's hot.
-
-Format convention (loose — edit the existing file's style):
-
-```
-> Last updated: 2026-05-28T14:00 by <your-agent-name>
-
-## Current focus
-<one-paragraph state of what's happening, who's doing what>
-```
-
-**Don't** rewrite history that other agents wrote. Append your update, or replace the section that's specifically about your work.
-
----
+`current-focus.md` is the "what's hot right now" board. When you start or
+finish a major task, prepend your block (`ac focus` or manual Edit in place).
+Never rewrite history other agents wrote.
 
 ## Capability 3 — Check inbox / send messages
 
-Inbox lives at `~/.agent-commons/handoff/inbox/`.
-
-### Receive
-
-When the user says "check your inbox" / "any messages for you?":
-
-```bash
-ls ~/.agent-commons/handoff/inbox/ | grep "to-<your-agent-name>-"
-```
-
-For each match: read it, act on it, then `mv` to `~/.agent-commons/handoff/archive/`.
-
-### Send
-
-To send a message to another agent:
-
-```
-~/.agent-commons/handoff/inbox/from-<your-name>-to-<dst-name>-<topic>.md
-```
-
-Markdown body. Be specific: what you did, what's left, where the artifacts are. The recipient may be a different model / different session — write for someone with no context.
-
----
+Inbox: `~/.agent-commons/handoff/inbox/`.
+- Receive: `ls ~/.agent-commons/handoff/inbox/ | grep "to-<your-agent-name>-"`, read, act, then `mv` to `handoff/archive/`.
+- Send: `from-<src>-to-<dst>-<topic>.md` — write for a recipient with no context (what you did, what's left, where artifacts are).
 
 ## Capability 4 — Daily log
 
-After **substantive work**, append to:
+After **substantive work** (built/fixed/decided/learned a lasting fact), append to `~/.agent-commons/log/daily/YYYY-MM-DD-<your-agent-name>.md` — per-agent file, append-only. **Skip** greetings / lookups / short Q&A.
 
-```
-~/.agent-commons/log/daily/YYYY-MM-DD-<your-agent-name>.md
-```
+Good entry: `## <title>` + What / Why / Result / Cross-agent note (if others need to know).
 
-**Per-agent file** — don't write to other agents' daily files. Always **append**, never overwrite.
+## Capability 5 — Refresh last_seen
 
-Substantive work = built/modified a project, fixed a bug, made a non-trivial decision, learned a long-term user fact. **Skip** greetings, simple lookups, short Q&A.
+Once per session, update your entry's `last_seen` (prefer `ac last-seen`, fallback Edit). Never overwrite the whole registry — patch only your entry.
 
-A good log entry:
+## Capability 6 — Where to persist shared data
 
-```markdown
-## <short title>
-
-**What**: <one paragraph>
-**Why**: <if non-obvious>
-**Result**: <commit hash, file paths, or "blocked because X">
-**Cross-agent note**: <only if other agents need to know — e.g., "Updated rules/public-repo.md, all agents should re-read">
-```
-
----
-
-## Capability 5 — Update last_seen on registry
-
-Once per session (lightly — no need every turn), update your entry's `last_seen` in `~/.agent-commons/registry.json` via `Edit`:
-
-```json
-"last_seen": "<ISO 8601 now>"
-```
-
-Don't rewrite other fields unless they actually changed (e.g. a new capability). **Never overwrite the whole file** — `Edit` patches only.
-
----
-
-## Capability 6 — Pointer: where to install / persist things going forward
-
-You already learned this during onboarding (see `~/.agent-commons/ONBOARDING.md` § Step 6.5). It is **not** repeated here in detail — this skill is the runtime, not the joining flow.
-
-In one line: **for any new skill / MCP server / plugin / CLI tool / persistent data you (or a sibling skill) install or write going forward, default to `~/.agent-commons/{skills,mcp,plugins,tools,skills_data}/<name>/`**, not a private path elsewhere.
-
-If you need the full rationale, the install/use guidance, or the privacy-layering recipe, **re-read ONBOARDING.md § Step 6.5** — that is the canonical place.
-
----
+New skill / MCP / plugin / tool / persistent data you install → default to `~/.agent-commons/{skills,skills_data,mcp,plugins,tools}/<name>/`, not a private path. The user backs up the whole `~/.agent-commons/` with one command.
 
 ## Failure modes
 
-- Some files missing → read what exists, note the rest. Don't block.
-- `registry.json` not writable → log the issue, proceed in read-only mode.
-- Today's daily log file doesn't exist → create it with a top heading `# YYYY-MM-DD — <your-agent-name>`, then append.
-- Inbox has files written in a format you don't understand → read them anyway, reply to sender with a structured request for clarity.
-
----
-
-## What this skill does NOT do
-
-- **Onboard / install / register first-time.** That's `~/.agent-commons/ONBOARDING.md`.
-- **Resync the skill files themselves.** If you used Tier 2 (copy) and need fresh skill files, see ONBOARDING.md Step 6.
-- **Manage the toolchain.** `toolchain/*.md` is read-only context for you; the user owns it.
-
----
+- Some files missing → read what exists, note the rest, don't block.
+- `registry.json` not writable → log the issue, proceed read-only.
+- Inbox file in an unexpected format → read anyway, reply with a structured request for clarity.
 
 ## Spec
 
-- Manifest: `~/.agent-commons/skills/agent-commons/manifest.json`
-- Onboarding (one-time): `~/.agent-commons/ONBOARDING.md`
+- Manifest: `skills/agent-commons/manifest.json`
+- Onboarding (one-time): `ONBOARDING.md`
+- Conventions: `CONVENTIONS.md`
 - Repository: https://github.com/dqsjqian/agent-commons
 - License: MIT

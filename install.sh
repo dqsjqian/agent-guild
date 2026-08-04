@@ -33,13 +33,15 @@ REPO_RAW_URL="${AGENT_COMMONS_REPO:-https://raw.githubusercontent.com/dqsjqian/a
   #   mcp/<server>/         shared MCP server configs / local implementations
   #   plugins/<name>/       shared plugins (e.g. browser/editor extensions)
   #   tools/<name>/         shared scripts / utilities (CLI helpers, dotfiles, etc.)
-  mkdir -p "$CENTRAL"/{skills/agent-commons,skills_data,mcp,plugins,tools,identity,rules,toolchain,projects,log/daily,log/decisions,log/archive,handoff/inbox,handoff/archive,handoff/shared-state}
+  mkdir -p "$CENTRAL"/{skills/agent-commons/scripts,skills_data,mcp,plugins,tools,identity,rules,toolchain,projects,log/daily,log/decisions,log/archive,handoff/inbox,handoff/archive,handoff/shared-state}
 
   # Protocol skeleton (always overwrite — controlled by this project)
   curl -fsSL "$REPO_RAW_URL/ONBOARDING.md"                         -o "$CENTRAL/ONBOARDING.md"
   curl -fsSL "$REPO_RAW_URL/CONVENTIONS.md"                        -o "$CENTRAL/CONVENTIONS.md"
   curl -fsSL "$REPO_RAW_URL/skills/agent-commons/SKILL.md"         -o "$CENTRAL/skills/agent-commons/SKILL.md"
   curl -fsSL "$REPO_RAW_URL/skills/agent-commons/manifest.json"    -o "$CENTRAL/skills/agent-commons/manifest.json"
+  curl -fsSL "$REPO_RAW_URL/scripts/ac.py"                         -o "$CENTRAL/skills/agent-commons/scripts/ac.py"
+  chmod +x "$CENTRAL/skills/agent-commons/scripts/ac.py" 2>/dev/null || true
 
   # User-owned templates (only seed if missing — never overwrite your edits)
   seed_if_missing() {
@@ -83,6 +85,9 @@ EOF
 }
 EOF
   fi
+
+  # Audit trail (append-only; ac.py creates it on demand if missing)
+  [ -f "$CENTRAL/log/audit.jsonl" ] || : > "$CENTRAL/log/audit.jsonl"
 } > /dev/null 2>&1
 
 # ── User-facing output (the only thing the user sees) ──────────────

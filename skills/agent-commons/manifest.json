@@ -2,10 +2,15 @@
   "$schema": "https://github.com/dqsjqian/agent-commons/raw/main/spec/manifest.schema.json",
   "name": "agent-commons",
   "protocol_version": "2.0",
+  "skill_version": "3.0",
   "spec_url": "https://github.com/dqsjqian/agent-commons/blob/main/SPEC.md",
   "onboarding_url": "https://github.com/dqsjqian/agent-commons/blob/main/ONBOARDING.md",
   "skill_url": "https://github.com/dqsjqian/agent-commons/blob/main/skills/agent-commons/SKILL.md",
   "conventions_url": "https://github.com/dqsjqian/agent-commons/blob/main/CONVENTIONS.md",
+  "scripts": {
+    "cli": "scripts/ac.py",
+    "package": "scripts/package.sh"
+  },
   "central_dir": "~/.agent-commons/",
   "central_layout": {
     "_note": "Top-level directory layout under ~/.agent-commons/. Protocol layer (mandatory) and convention layer (optional, per CONVENTIONS.md) co-exist as physical sibling directories.",
