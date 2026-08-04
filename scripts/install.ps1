@@ -59,8 +59,8 @@ $null = & {
         }
     }
 
-    Download-File "$RepoRawUrl/ONBOARDING.md"                      (Join-Path $Central 'ONBOARDING.md')                          | Out-Null
-    Download-File "$RepoRawUrl/CONVENTIONS.md"                     (Join-Path $Central 'CONVENTIONS.md')                         | Out-Null
+    Download-File "$RepoRawUrl/docs/ONBOARDING.md"                      (Join-Path $Central 'ONBOARDING.md')                          | Out-Null
+    Download-File "$RepoRawUrl/docs/CONVENTIONS.md"                     (Join-Path $Central 'CONVENTIONS.md')                         | Out-Null
     Download-File "$RepoRawUrl/SKILL.md"      (Join-Path $Central 'skills\agent-commons\SKILL.md')      | Out-Null
     Download-File "$RepoRawUrl/manifest.json" (Join-Path $Central 'skills\agent-commons\manifest.json') | Out-Null
 
@@ -120,5 +120,5 @@ $msg2 = $utf8.GetString([byte[]](0xEF,0xBC,0x88,0x50,0x6C,0x65,0x61,0x73,0x65,0x
 Write-Host ""
 Write-Host ("  " + $msg1 + $msg2)
 Write-Host ""
-Write-Host "  Read ~/.agent-commons/ONBOARDING.md"
+Write-Host "  Read ~/.agent-commons/docs/ONBOARDING.md"
 Write-Host ""

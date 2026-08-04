@@ -30,7 +30,7 @@
 ├── projects/                    ← 你在做什么
 ├── log/daily/                   ← 按 agent 分文件的日志（无写冲突）
 ├── handoff/                     ← 跨 agent 收件箱 + 共享状态
-├── SKILL.md / manifest.json    ← runtime skill 入口（仓库根 = skill 包）
+├── skills/agent-commons/    ← 从仓库根安装的 runtime skill（SKILL.md + manifest + scripts）
 ├── registry.json                ← 哪些 agent 加入了
 │
 │  ─── 约定层（可选，推荐）───
@@ -86,10 +86,10 @@
 
 详见：
 - [`ONBOARDING.md`](ONBOARDING.md) —— 一次性入会流程
-- [`SKILL.md`](SKILL.md) —— 加入后的运行时能力
+- [`SKILL.md`](../SKILL.md) —— 加入后的运行时能力
 - [`SPEC.md`](SPEC.md) —— 完整协议规范
 - [`CONVENTIONS.md`](CONVENTIONS.md) —— 非规范性的可选约定（如推荐的 skill 数据位置 `~/.agent-commons/skills_data/`）
-- [`manifest.json`](manifest.json) —— 机器可读
+- [`manifest.json`](../manifest.json) —— 机器可读
 
 ---
 
@@ -106,13 +106,13 @@
 ### macOS / Linux / WSL / Git Bash
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/dqsjqian/agent-commons/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/dqsjqian/agent-commons/main/scripts/install.sh | bash
 ```
 
 ### Windows（PowerShell）
 
 ```powershell
-iwr -useb https://raw.githubusercontent.com/dqsjqian/agent-commons/main/install.ps1 | iex
+iwr -useb https://raw.githubusercontent.com/dqsjqian/agent-commons/main/scripts/install.ps1 | iex
 ```
 
 安装器只做**一件事**：在 `~/.agent-commons/`（Windows 上是 `%USERPROFILE%\.agent-commons\`）建中央目录 + seed 模板 + 末尾打印一条双语口令让你复制给 agent。**它不会动任何 agent 的 home 目录。** Agent 自己负责接入——这就是协议。
@@ -146,7 +146,7 @@ Agent 会自己想办法接入（软链、拷贝、或者只读 fallback——�
 ```bash
 cd ~/.agent-commons && git pull   # （如果通过 git clone 装的）
 # 或重新跑：
-curl -fsSL https://raw.githubusercontent.com/dqsjqian/agent-commons/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/dqsjqian/agent-commons/main/scripts/install.sh | bash
 ```
 
 升级**永远不会**覆盖你的 `identity/` `rules/` `toolchain/`。只会更新协议骨架（`skills/`）。

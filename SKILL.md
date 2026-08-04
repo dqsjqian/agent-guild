@@ -19,7 +19,7 @@ description: |
   "读共享身份", "读共享规则", "当前焦点", "检查收件箱", "记到共享日志",
   "交接给 <其他 agent>", "数据存哪", "加入 agent commons", any equivalent.
 
-  First-time agents: run onboarding first (see ONBOARDING.md in this skill) —
+  First-time agents: run onboarding first (see docs/ONBOARDING.md in this skill) —
   this SKILL.md is the runtime capability for already-joined agents.
 version: "3.0"
 license: MIT
@@ -35,7 +35,7 @@ agent_created: true
 ## Quick start (for an agent that has NOT joined yet)
 
 1. Run the onboarding flow: `~/.agent-commons/ONBOARDING.md` (or this skill's
-   `ONBOARDING.md`) — discover your runtime's user-extensible skills dir,
+   `docs/ONBOARDING.md`) — discover your runtime's user-extensible skills dir,
    install this skill (symlink → copy → readonly), run the closed-loop trigger
    test, register yourself in `registry.json`.
 2. Then come back here — this file is your everyday capability.
@@ -121,7 +121,7 @@ New skill / MCP / plugin / tool / persistent data you install → default to `~/
 ## Spec
 
 - Manifest: `manifest.json`
-- Onboarding (one-time): `ONBOARDING.md`
-- Conventions: `CONVENTIONS.md`
+- Onboarding (one-time): `docs/ONBOARDING.md`
+- Conventions: `docs/CONVENTIONS.md`
 - Repository: https://github.com/dqsjqian/agent-commons
 - License: MIT

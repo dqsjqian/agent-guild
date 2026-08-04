@@ -20,15 +20,15 @@ STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
 
 PKG="$STAGE/agent-commons"
-mkdir -p "$PKG/scripts"
+mkdir -p "$PKG/scripts" "$PKG/docs"
 
-cp "$ROOT/SKILL.md"     "$PKG/SKILL.md"
+cp "$ROOT/SKILL.md"      "$PKG/SKILL.md"
 cp "$ROOT/manifest.json" "$PKG/manifest.json"
-cp "$ROOT/ONBOARDING.md"                     "$PKG/ONBOARDING.md"
-cp "$ROOT/CONVENTIONS.md"                    "$PKG/CONVENTIONS.md"
-cp "$ROOT/LICENSE"                           "$PKG/LICENSE"
-cp "$ROOT/README.md"                         "$PKG/README.md"
-cp "$ROOT/scripts/ac.py"                     "$PKG/scripts/ac.py"
+cp "$ROOT/LICENSE"       "$PKG/LICENSE"
+cp "$ROOT/scripts/ac.py" "$PKG/scripts/ac.py"
+cp "$ROOT/docs/ONBOARDING.md"  "$PKG/docs/ONBOARDING.md"
+cp "$ROOT/docs/CONVENTIONS.md" "$PKG/docs/CONVENTIONS.md"
+cp "$ROOT/docs/README.md"      "$PKG/docs/README.md"
 
 mkdir -p "$(dirname "$OUT")"
 rm -f "$OUT"

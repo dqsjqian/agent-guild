@@ -30,7 +30,7 @@
 ├── projects/                    ← What you're working on
 ├── log/daily/                   ← Per-agent daily logs (no write conflicts)
 ├── handoff/                     ← Cross-agent inbox + shared state
-├── SKILL.md / manifest.json    ← Runtime skill entry (repo root = skill package)
+├── skills/agent-commons/    ← Runtime skill installed from repo root (SKILL.md + manifest + scripts)
 ├── registry.json                ← Which agents have joined
 │
 │  ─── Convention layer (optional, recommended) ───
@@ -85,10 +85,10 @@ The protocol cleanly separates **one-time joining** from **ongoing capabilities*
 - **`SKILL.md`** (recurring): read shared identity / rules / current focus; check inbox / send messages; append daily logs; refresh `last_seen`. This is the runtime capability the joined agent carries forward.
 
 See [`ONBOARDING.md`](ONBOARDING.md) for the joining flow.
-See [`SKILL.md`](SKILL.md) for the runtime capability spec.
+See [`SKILL.md`](../SKILL.md) for the runtime capability spec.
 See [`SPEC.md`](SPEC.md) for the full normative specification.
 See [`CONVENTIONS.md`](CONVENTIONS.md) for optional, non-normative conventions (e.g. recommended skill data location at `~/.agent-commons/skills_data/`).
-See [`manifest.json`](manifest.json) for the machine-readable spec.
+See [`manifest.json`](../manifest.json) for the machine-readable spec.
 
 ---
 
@@ -105,13 +105,13 @@ User-owned files (`identity/`, `rules/`, `toolchain/`, etc.) are **never overwri
 ### macOS / Linux / WSL / Git Bash
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/dqsjqian/agent-commons/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/dqsjqian/agent-commons/main/scripts/install.sh | bash
 ```
 
 ### Windows (PowerShell)
 
 ```powershell
-iwr -useb https://raw.githubusercontent.com/dqsjqian/agent-commons/main/install.ps1 | iex
+iwr -useb https://raw.githubusercontent.com/dqsjqian/agent-commons/main/scripts/install.ps1 | iex
 ```
 
 The installer does exactly **one** thing: bootstrap the central directory at `~/.agent-commons/` (or `%USERPROFILE%\.agent-commons\`) with seed files, then print a bilingual one-liner you can paste into any AI agent. **It does not touch any agent's home directory.** Agents install themselves — that's the protocol.

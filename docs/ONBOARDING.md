@@ -51,7 +51,7 @@ You must see at least: `identity/  rules/  toolchain/  projects/  log/  handoff/
 If the directory is missing, the user has not run the installer yet. Tell them:
 
 > "I need you to run the Agent Commons installer first:
->   - macOS/Linux: `curl -fsSL https://raw.githubusercontent.com/dqsjqian/agent-commons/main/install.sh | bash`
+>   - macOS/Linux: `curl -fsSL https://raw.githubusercontent.com/dqsjqian/agent-commons/main/scripts/install.sh | bash`
 >   - Windows: `iwr -useb https://raw.githubusercontent.com/dqsjqian/agent-commons/main/install.ps1 | iex`"
 
 Then stop. Re-run this onboarding after they've installed.
@@ -247,7 +247,7 @@ Add or update your entry:
 }
 ```
 
-The `protocol_version` field on your entry is what the runtime skill uses to detect major version drift (see `SKILL.md` § Self-check). Don't omit it.
+The `protocol_version` field on your entry is what the runtime skill uses to detect major version drift (see `../SKILL.md` § Self-check). Don't omit it.
 
 If you can't write to registry.json (no FS permission) → log it and proceed. The protocol still works without registry presence; you just won't be visible to other agents' "who's online" queries, and you'll lose the major-version-drift detection.
 
