@@ -2,39 +2,29 @@
 name: agent-guild
 description: |
   智能体协会（agent-guild）— a local-first, cross-agent shared memory protocol.
-  Any AI agent (Claude Code / Cursor / Copilot / Aider / Cline / Continue /
-  Windsurf / Gemini CLI / desktop assistants / ...) can
-  join this system to share one user identity, obey one set of rules, and
-  coordinate handoffs — no servers, plaintext Markdown + JSON only.
+  Any AI agent (Claude Code / Cursor / Copilot / Aider / Cline / Windsurf /
+  desktop assistants / ...) shares one user identity, one set of rules, and
+  coordinated handoffs — no servers, plaintext Markdown + JSON only.
 
-  What this skill gives a joined agent:
-  - bootstrap the shared directory on first use (`ag init`, idempotent)
-  - self-audit your own home and move skills/mcp/tools/data/memory into the
-    guild, symlinked back so your runtime keeps working (`ag adopt`)
-  - read shared user identity / rules / routines / current focus in one shot
-    (`ag bootstrap`)
-  - check inbox for messages from other agents, send handoff messages
-  - append today's per-agent daily log
-  - update current-focus and registry last_seen (atomic + audited via `ag`)
-  - health-check the whole installation (`ag doctor`)
+  Capabilities: bootstrap the shared dir (`ag init`); self-audit your own home
+  and move skills/mcp/tools/data/memory into the guild, linked back so your
+  runtime keeps working (`ag adopt`); load all shared context in one shot
+  (`ag bootstrap`); inbox + handoffs; daily log; health check (`ag doctor`).
 
-  Triggers — session start / before real work: "read shared identity",
-  "read agent guild rules", "what's the current focus", "check my inbox",
-  "who am I talking to", "load my context", "读共享身份", "读共享规则",
-  "当前焦点", "检查收件箱", "加载上下文", "我在跟谁说话".
-  Session end / after finishing work: "log this to agent guild", "记到共享日志",
-  "沉淀一下", "写入记忆", "update current focus", "更新当前焦点",
-  "hand off to <other-agent>", "交接给 <其他 agent>".
-  Setup / maintenance: "加入智能体协会", "join agent guild", "初始化协会目录",
-  "init agent guild", "把我的 skill 搬进协会", "adopt my skills",
-  "自检一下协会", "agent guild doctor", "where do I save this", "数据存哪".
-  Any equivalent phrasing counts.
+  Triggers — before work: "read shared identity", "what's the current focus",
+  "check my inbox", "读共享身份", "当前焦点", "检查收件箱". After work:
+  "log this to agent guild", "记到共享日志", "沉淀一下", "hand off to <agent>",
+  "交接给 <其他 agent>". Setup: "join agent guild", "加入智能体协会",
+  "adopt my skills", "把我的 skill 搬进协会", "数据存哪". Or any equivalent.
 
-  First-time agents: run onboarding first (see docs/ONBOARDING.md in this skill) —
-  this SKILL.md is the runtime capability for already-joined agents.
+  Not joined yet? Run docs/ONBOARDING.md once; this file is the runtime skill.
+slug: agent-guild
+displayName: 智能体协会 Agent Guild
 protocol_version: "3.0"
 version: "3.1"
 license: MIT
+homepage: https://github.com/dqsjqian/agent-guild
+repository: https://github.com/dqsjqian/agent-guild
 agent_created: true
 ---
 

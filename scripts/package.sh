@@ -6,8 +6,10 @@
 # user's ~/.agent-guild/ at runtime (capability/data separation).
 #
 # Usage:
-#   bash scripts/package.sh                # → dist/agent-guild-skill-vX.Y.Z.zip
+#   bash scripts/package.sh                # → ~/Downloads/agent-guild-skill-vX.Y.Z.zip
 #   bash scripts/package.sh /path/out.zip  # custom output path
+#   REGISTRY_SAFE=1 bash scripts/package.sh  # omit extensionless files (LICENSE)
+#                                            # for registries that reject them
 
 set -e
 
@@ -24,7 +26,6 @@ mkdir -p "$PKG/scripts" "$PKG/docs"
 
 cp "$ROOT/SKILL.md"      "$PKG/SKILL.md"
 cp "$ROOT/manifest.json" "$PKG/manifest.json"
-cp "$ROOT/LICENSE"       "$PKG/LICENSE"
 cp "$ROOT/scripts/ag.py" "$PKG/scripts/ag.py"
 cp "$ROOT/scripts/install.sh"  "$PKG/scripts/install.sh"
 cp "$ROOT/scripts/install.ps1" "$PKG/scripts/install.ps1"
@@ -33,6 +34,14 @@ cp "$ROOT/docs/CONVENTIONS.md" "$PKG/docs/CONVENTIONS.md"
 cp "$ROOT/docs/README.md"      "$PKG/docs/README.md"
 cp "$ROOT/docs/README_CN.md"   "$PKG/docs/README_CN.md"
 chmod +x "$PKG/scripts/ag.py" "$PKG/scripts/install.sh" 2>/dev/null || true
+
+# Some skill registries reject extensionless files. Ship the license as
+# LICENSE.md there so the terms still travel with the package.
+if [ -n "${REGISTRY_SAFE:-}" ]; then
+  cp "$ROOT/LICENSE" "$PKG/LICENSE.md"
+else
+  cp "$ROOT/LICENSE" "$PKG/LICENSE"
+fi
 
 mkdir -p "$(dirname "$OUT")"
 rm -f "$OUT"
