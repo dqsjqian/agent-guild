@@ -1,8 +1,8 @@
-# Agent Guild — Conventions (non-normative)
+# Agent Guild — Conventions (default-on)
 
-> This file describes **optional conventions** for things that are *not* part of the core protocol. Following them gives users a more uniform experience across multiple skills, but agents and skills are free to ignore them.
+> This file describes **default-on conventions** for things that live *alongside* the core protocol. They are NOT optional: every joined agent MUST follow them, with one escape hatch — if your runtime *requires* a private location (e.g. a platform-managed skills dir), use it and note the reason in `registry.json`. That counts as compliant.
 >
-> If you only care about the core protocol (joining, identity, rules, handoff, daily logs), you can skip this file. See [`SPEC.md`](SPEC.md) and [`ONBOARDING.md`](ONBOARDING.md) instead.
+> These conventions sit a layer *above* the core protocol (identity / rules / handoff / daily logs — see [`SPEC.md`](SPEC.md) and [`ONBOARDING.md`](ONBOARDING.md)). The protocol layer is the hard MUST; this convention layer is default-on with a documented escape hatch.
 
 ## Why conventions, not rules
 
@@ -14,13 +14,13 @@ But over time, multiple skills end up wanting *similar* things:
 - A place to put per-skill configuration
 - A way to declare external dependencies
 
-If every skill picks its own `~/.<random-name>/` directory, users end up with a scattered mess of "where does this skill keep its stuff?". Conventions give skills a recommended answer to questions like that — without forcing it.
+If every skill picks its own `~/.<random-name>/` directory, users end up with a scattered mess of "where does this skill keep its stuff?". Conventions give skills a single default answer to questions like that (escape hatch: runtime-forced private paths, noted in registry).
 
 **A skill that follows the conventions here gets the user a uniform backup/sync story for free.** A skill that ignores them still works fine; it just doesn't compose as neatly with sibling skills.
 
 ## Convention 0 — Shared skill bus
 
-> **Recommended location for skills that should be available to every joined agent: `~/.agent-guild/skills/<skill-name>/`**
+> **Default location for skills that should be available to every joined agent: `~/.agent-guild/skills/<skill-name>/`**
 
 The `skills/` directory is **not** just where Agent Guild keeps its own runtime skill — it is the **shared skill bus** for the whole protocol. Any skill placed under `~/.agent-guild/skills/<name>/` is reachable by every joined agent on the machine, not just the one that installed it.
 
@@ -46,7 +46,7 @@ Without this convention, each agent maintains its own private skill collection �
 
 ## Convention 1 — Skill data root
 
-> **Recommended location for per-skill persistent data: `~/.agent-guild/skills_data/<skill-name>/`**
+> **Default location for per-skill persistent data: `~/.agent-guild/skills_data/<skill-name>/`**
 
 Skills that need to persist non-trivial data — accumulated user models, knowledge graphs, conversation logs, learned patterns, caches — **MAY** use a subdirectory under `~/.agent-guild/skills_data/` named after the skill itself.
 
@@ -93,9 +93,9 @@ Skills that hold **mixed-sensitivity data** SHOULD split into clearly named subd
 └── ...
 ```
 
-This is a recommendation, not a requirement. The point is: **make it easy for users to back up safely without surprising them**.
+This is default-on, not optional. The point is: **make it easy for users to back up safely without surprising them**.
 
-### Recommended `.gitignore` template
+### Default `.gitignore` template
 
 If the user wants to version-control `~/.agent-guild/` for personal multi-device sync via private git, this is a sensible starting point:
 
@@ -130,7 +130,7 @@ This is purely informational — for users browsing their own data, and for tool
 
 ## Convention 3 — Shared MCP servers
 
-> **Recommended location for MCP servers shared across joined agents: `~/.agent-guild/mcp/<server-name>/`**
+> **Default location for MCP servers shared across joined agents: `~/.agent-guild/mcp/<server-name>/`**
 
 MCP servers that are agent-agnostic (not bound to a specific runtime's lifecycle) SHOULD be installed under `~/.agent-guild/mcp/<server-name>/`. The directory MAY contain:
 
@@ -142,7 +142,7 @@ Joined agents that want to use the server SHOULD point their runtime's MCP confi
 
 ## Convention 4 — Shared plugins
 
-> **Recommended location for cross-agent plugins: `~/.agent-guild/plugins/<plugin-name>/`**
+> **Default location for cross-agent plugins: `~/.agent-guild/plugins/<plugin-name>/`**
 
 For plugins that aren't tied to a single agent's runtime — e.g. browser/editor/IDE extensions, tools that hook into a generic plugin protocol, scripts that several different agents might invoke. Each subdirectory is owned by the plugin.
 
@@ -150,15 +150,15 @@ If a plugin is fundamentally **agent-specific** (e.g. only loadable by one speci
 
 ## Convention 5 — Shared CLI tools
 
-> **Recommended location for shared command-line scripts and utilities: `~/.agent-guild/tools/<tool-name>/`**
+> **Default location for shared command-line scripts and utilities: `~/.agent-guild/tools/<tool-name>/`**
 
-For helper scripts and small utilities the user (or any agent) might run from any shell session. Examples: an `ac` CLI for browsing the central directory, a custom `gh-helper.sh`, a Python script that reformats agent logs.
+For helper scripts and small utilities the user (or any agent) might run from any shell session. Examples: an `ag` CLI for browsing the central directory, a custom `gh-helper.sh`, a Python script that reformats agent logs.
 
 The user MAY add `~/.agent-guild/tools/*/bin/` to `$PATH` if they want shell-level access. This is a user convenience, not a protocol requirement.
 
-## Convention 6 — No protocol expansion via conventions
+## Convention 6 — Conventions are default-on; protocol stays versioned
 
-**Conventions in this file MUST NOT become required behavior over time.** The protocol layer (`SPEC.md`) is intentionally small and stable. If a future need genuinely requires a protocol change, it goes through a normal versioned spec bump — not by quietly upgrading a convention to a requirement.
+**Conventions in this file are default-on, not optional** (escape hatch documented at the top). The *protocol* layer (`SPEC.md`) remains intentionally small and stable — a change to hard protocol requirements still goes through a normal versioned spec bump, not by quietly rewording a convention.
 
 If you build a skill that wants to read another skill's `skills_data/`, that's between the two skills — don't lobby for the protocol to standardize the cross-skill access pattern.
 
@@ -174,7 +174,7 @@ If you build a skill that wants to read another skill's `skills_data/`, that's b
 | 3 — Shared MCP | `~/.agent-guild/mcp/<name>/` | Agent-agnostic MCP servers | Any agent that wires up to them |
 | 4 — Shared plugins | `~/.agent-guild/plugins/<name>/` | Cross-agent plugins (browser/editor/IDE extensions) | Any compatible host |
 | 5 — Shared CLI tools | `~/.agent-guild/tools/<name>/` | Scripts / utilities runnable from any shell | Anyone — agent or human |
-| 6 — Don't expand | — | Reminds future maintainers conventions stay non-normative | — |
+| 6 — Default-on, versioned | — | Conventions are default-on; hard protocol changes stay versioned | — |
 
 ---
 

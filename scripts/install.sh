@@ -33,15 +33,19 @@ REPO_RAW_URL="${AGENT_GUILD_REPO:-https://raw.githubusercontent.com/dqsjqian/age
   #   mcp/<server>/         shared MCP server configs / local implementations
   #   plugins/<name>/       shared plugins (e.g. browser/editor extensions)
   #   tools/<name>/         shared scripts / utilities (CLI helpers, dotfiles, etc.)
-  mkdir -p "$CENTRAL"/{skills/agent-guild/scripts,skills_data,mcp,plugins,tools,identity,rules,toolchain,projects,log/daily,log/decisions,log/archive,handoff/inbox,handoff/archive,handoff/shared-state}
+  #   memory/<agent>/       agent-private memory adopted from each runtime
+  #   memory/shared/        facts every joined agent should know
+  mkdir -p "$CENTRAL"/{skills/agent-guild/scripts,skills_data,mcp,plugins,tools,memory/shared,identity,rules,toolchain,projects,log/daily,log/decisions,log/archive,handoff/inbox,handoff/archive,handoff/shared-state}
 
   # Protocol skeleton (always overwrite — controlled by this project)
   curl -fsSL "$REPO_RAW_URL/docs/ONBOARDING.md"                         -o "$CENTRAL/ONBOARDING.md"
   curl -fsSL "$REPO_RAW_URL/docs/CONVENTIONS.md"                        -o "$CENTRAL/CONVENTIONS.md"
   curl -fsSL "$REPO_RAW_URL/SKILL.md"         -o "$CENTRAL/skills/agent-guild/SKILL.md"
   curl -fsSL "$REPO_RAW_URL/manifest.json"    -o "$CENTRAL/skills/agent-guild/manifest.json"
-  curl -fsSL "$REPO_RAW_URL/scripts/ac.py"                         -o "$CENTRAL/skills/agent-guild/scripts/ac.py"
-  chmod +x "$CENTRAL/skills/agent-guild/scripts/ac.py" 2>/dev/null || true
+  curl -fsSL "$REPO_RAW_URL/scripts/ag.py"                         -o "$CENTRAL/skills/agent-guild/scripts/ag.py"
+  chmod +x "$CENTRAL/skills/agent-guild/scripts/ag.py" 2>/dev/null || true
+  # Remove the pre-3.0 CLI name if upgrading from an older install
+  rm -f "$CENTRAL/skills/agent-guild/scripts/ac.py" 2>/dev/null || true
 
   # User-owned templates (only seed if missing — never overwrite your edits)
   seed_if_missing() {
@@ -80,13 +84,14 @@ EOF
   if [ ! -f "$CENTRAL/registry.json" ]; then
     cat > "$CENTRAL/registry.json" <<'EOF'
 {
-  "protocol_version": "2.0",
+  "protocol_version": "3.0",
+  "central_dir": "~/.agent-guild/",
   "agents": {}
 }
 EOF
   fi
 
-  # Audit trail (append-only; ac.py creates it on demand if missing)
+  # Audit trail (append-only; ag.py creates it on demand if missing)
   [ -f "$CENTRAL/log/audit.jsonl" ] || : > "$CENTRAL/log/audit.jsonl"
 } > /dev/null 2>&1
 

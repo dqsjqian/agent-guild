@@ -161,11 +161,11 @@ curl -fsSL https://raw.githubusercontent.com/dqsjqian/agent-guild/main/scripts/i
 
 ## 项目状态 & 设计哲学
 
-**Phase 1（当前）：协议 + 参考内容。** 本仓库提供目录骨架、`SKILL.md`、`manifest.json` 和安装脚本。**全部 shell 不到 200 行。** README 才是产品。
+**Phase 1（已完成）：协议 + 参考内容。** 目录骨架、`SKILL.md`、`manifest.json`、跨平台安装脚本。README 才是产品。
 
-**Phase 2（看反响再做）：单文件 Python CLI**（`ac` 命令），子命令 `init / link / status / append / doctor`。stdlib only，零第三方依赖。
+**Phase 2（3.0 已完成）：单文件 Python CLI**（`ag` 命令），子命令 `init / adopt / bootstrap / doctor / status / register / log / focus / send / audit / prune`。stdlib only，零第三方依赖，Windows / macOS / Linux 通用。
 
-**Phase 3（更后）：Adapters 目录。** 社区贡献各 agent 的接入指南。
+**Phase 3（进行中）：Adapters 目录。** 社区贡献各 agent 的接入指南。
 
 我们**坚决不会**做：
 

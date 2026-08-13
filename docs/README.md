@@ -148,11 +148,11 @@ Then talk to your agent.
 
 ## Project status & philosophy
 
-**Phase 1 (current): Protocol + reference content.** This repo ships the directory skeleton, `SKILL.md`, `manifest.json`, and an install script. **Less than 200 lines of shell.** The README is the product.
+**Phase 1 (done): Protocol + reference content.** Directory skeleton, `SKILL.md`, `manifest.json`, cross-platform installers. The README is the product.
 
-**Phase 2 (later, if interest): Optional CLI** (`ac` command) for `init / link / status / append / doctor`. Single-file Python, stdlib only.
+**Phase 2 (done in 3.0): Single-file CLI** (`ag`) — `init / adopt / bootstrap / doctor / status / register / log / focus / send / audit / prune`. Pure Python stdlib, zero dependencies, Windows / macOS / Linux.
 
-**Phase 3 (much later): Adapters directory.** Community-contributed integration guides for specific agents.
+**Phase 3 (in progress): Adapters directory.** Community-contributed integration guides for specific agents.
 
 We are deliberately **not** building:
 - a daemon

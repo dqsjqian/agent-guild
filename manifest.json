@@ -1,19 +1,19 @@
 {
   "$schema": "https://github.com/dqsjqian/agent-guild/raw/main/spec/manifest.schema.json",
   "name": "agent-guild",
-  "protocol_version": "2.0",
-  "skill_version": "3.0",
+  "protocol_version": "3.0",
+  "skill_version": "3.1",
   "spec_url": "https://github.com/dqsjqian/agent-guild/blob/main/docs/SPEC.md",
   "onboarding_url": "https://github.com/dqsjqian/agent-guild/blob/main/docs/ONBOARDING.md",
   "skill_url": "https://github.com/dqsjqian/agent-guild/blob/main/SKILL.md",
   "conventions_url": "https://github.com/dqsjqian/agent-guild/blob/main/docs/CONVENTIONS.md",
   "scripts": {
-    "cli": "scripts/ac.py",
+    "cli": "scripts/ag.py",
     "package": "scripts/package.sh"
   },
   "central_dir": "~/.agent-guild/",
   "central_layout": {
-    "_note": "Top-level directory layout under ~/.agent-guild/. Protocol layer (mandatory) and convention layer (optional, per CONVENTIONS.md) co-exist as physical sibling directories.",
+    "_note": "Top-level directory layout under ~/.agent-guild/. Protocol layer (mandatory) and convention layer (default-on, per CONVENTIONS.md) co-exist as physical sibling directories.",
     "protocol_layer": {
       "identity/": "user identity profile + routine (read by all agents)",
       "rules/": "shared rules (universal, public-repo, file-cleanup, safety)",
@@ -23,11 +23,13 @@
       "log/": "daily logs (per-agent) + decisions + archive",
       "registry.json": "agent presence + install metadata",
       "ONBOARDING.md": "one-time joining flow",
-      "CONVENTIONS.md": "non-normative conventions (this file)"
+      "CONVENTIONS.md": "default-on conventions (this file)"
     },
     "convention_layer": {
       "skills/<name>/": "agent-loadable capabilities (this skill itself + future shared skills)",
-      "skills_data/<name>/": "per-skill persistent data — RECOMMENDED location for any skill that needs to persist user-facing data, gives users a single backup root",
+      "skills_data/<name>/": "per-skill persistent data — default location (escape hatch: runtime-forced private path) for any skill that needs to persist user-facing data, gives users a single backup root",
+      "memory/<agent>/": "agent-private memory files adopted from each runtime (MEMORY.md / SOUL.md / USER.md / IDENTITY.md, symlinked back to the agent home)",
+      "memory/shared/": "cross-agent facts worth sharing with every joined agent",
       "mcp/<server>/": "shared MCP server configs / local implementations (e.g. an MCP server installed once, used by every joined agent)",
       "plugins/<name>/": "shared plugins (browser/editor/IDE extensions, etc.)",
       "tools/<name>/": "shared scripts and CLI utilities (helpers users want available across all agents)"
@@ -71,6 +73,26 @@
     }
   },
   "actions": {
+    "init": {
+      "summary": "Bootstrap ~/.agent-guild/ when it does not exist: create the full protocol + convention skeleton (identity/rules/toolchain/projects/handoff/log/skills/skills_data/mcp/plugins/tools/memory), seed placeholder context files and registry.json, and install the agent-guild skill itself into skills/agent-guild/. Idempotent — safe to re-run every session; never clobbers existing data, only fills gaps.",
+      "cmd": "python3 <skill_dir>/scripts/ag.py init <agent>",
+      "write_mode": "create_if_missing"
+    },
+    "adopt": {
+      "summary": "Self-audit the calling agent's home for assets that belong in the guild (skills / skills_data / mcp / tools / memory), then move them in and symlink back so the runtime keeps working. DEFAULT IS DRY-RUN — prints a candidate report and changes nothing; only `--apply` executes. Excludes rebuildable caches (.venv/node_modules/__pycache__), credential stores, runtime-internal bookkeeping (agent-created-skills.json etc.), platform-managed packages (__skillhub/connector-*) and connector-backed skills. Every move is verified after linking and automatically rolled back on failure. Deletions go to trash, never rm.",
+      "cmd": "python3 <skill_dir>/scripts/ag.py adopt <agent> [--apply]",
+      "write_mode": "move_and_symlink"
+    },
+    "bootstrap": {
+      "summary": "One-shot read of all shared session context: identity/profile.md, identity/ROUTINE.md, rules/universal.md, projects/active.md, handoff/shared-state/current-focus.md, plus this agent's unread inbox and a list of other rules files to read on demand. Read-only — run this at session start instead of opening five files by hand.",
+      "cmd": "python3 <skill_dir>/scripts/ag.py bootstrap <agent>",
+      "write_mode": "none"
+    },
+    "doctor": {
+      "summary": "Health check across the whole installation: dangling symlinks inside the guild and inside every registered agent's skills_root, stale 'agent-commons' references in live protocol files, and registry drift (recorded home / skills_root no longer exists). Prints concrete fixes. Read-only — never repairs silently.",
+      "cmd": "python3 <skill_dir>/scripts/ag.py doctor",
+      "write_mode": "none"
+    },
     "onboard": {
       "summary": "One-time joining flow. The agent MUST install into its OWN user-extensible / 'custom skills' directory (NOT another agent's directory, NOT a built-in/whitelisted tier where files would land but never trigger). After install, MUST run a closed-loop trigger test in its own runtime; on failure, walk down symlink → copy → readonly autonomously, retesting after each change; only after exhausting all three tiers may the agent deliver an honest 'cannot fully join' report. 'Files on disk' is not success; 'runtime can trigger this skill' is success.",
       "ref": "ONBOARDING.md"
@@ -129,9 +151,9 @@
     }
   ],
   "guidance_for_joined_agents": {
-    "_note": "Once an agent has joined, it should treat the central directory as the recommended home for ALL user-facing persistent state, not just protocol files. This makes backup, sync, and migration trivial for the user.",
-    "where_to_persist_data": "If you (the agent OR a skill you load) need to persist data on this machine — caches, learned profiles, conversation logs, anything that should survive across sessions — RECOMMEND putting it under ~/.agent-guild/skills_data/<skill-name>/ instead of inventing a private location elsewhere. The user can then back up everything with one command.",
-    "where_to_install_mcp_servers": "If you install or configure an MCP server that should be shared with all joined agents (not bound to a single agent's runtime), RECOMMEND placing its config under ~/.agent-guild/mcp/<server-name>/.",
+    "_note": "Once an agent has joined, it MUST treat the central directory as the default home for ALL user-facing persistent state, not just protocol files (escape hatch: runtime-forced private paths, noted in registry). This makes backup, sync, and migration trivial for the user.",
+    "where_to_persist_data": "If you (the agent OR a skill you load) need to persist data on this machine — caches, learned profiles, conversation logs, anything that should survive across sessions — MUST put it under ~/.agent-guild/skills_data/<skill-name>/ instead of inventing a private location elsewhere (escape hatch: runtime-forced private path). The user can then back up everything with one command.",
+    "where_to_install_mcp_servers": "If you install or configure an MCP server that should be shared with all joined agents (not bound to a single agent's runtime), MUST place its config under ~/.agent-guild/mcp/<server-name>/.",
     "where_to_drop_plugins": "Shared plugins (e.g. agent-agnostic browser/editor extensions) belong under ~/.agent-guild/plugins/<name>/.",
     "where_to_drop_tools": "Shared CLI scripts / utilities the user might run from any shell session belong under ~/.agent-guild/tools/<name>/.",
     "privacy_layering": "If a skill writes mixed-sensitivity data, split into ~/.agent-guild/skills_data/<skill>/public/ vs .../private/ so users can apply different .gitignore policies (see CONVENTIONS.md)."
@@ -145,7 +167,7 @@
     "Convention over framework: ≤200 LOC of code; the README is the product",
     "Self-onboarding: agents install themselves, the protocol does not push code to them",
     "Triggerable = done: install is only complete when the runtime can actually invoke the skill",
-    "Convention layer is optional: skills/skills_data/mcp/plugins/tools are RECOMMENDED locations, not protocol requirements"
+    "Convention layer is default-on: skills/skills_data/mcp/plugins/tools are the default locations (escape hatch: runtime-forced private paths, noted in registry)"
   ],
   "supported_agents": [
     "Any AI agent that can read filesystem and follow natural-language instructions. Symlink support is preferred but not required (copy and readonly fallbacks exist)."

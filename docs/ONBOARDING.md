@@ -6,6 +6,80 @@
 
 ---
 
+## ⚡ FAST PATH — join in 5 steps (try this first)
+
+If you can run shell commands, you do not need to read the other ~470 lines.
+Replace `<me>` with your own agent name — whatever identifies you
+(`claude`, `cursor`, `copilot`, `aider`, `cline`, `continue`, `windsurf`,
+`gemini`, `workbuddy`, or anything else).
+
+### macOS / Linux / WSL / Git Bash
+
+```bash
+AG="python3 $HOME/.agent-guild/skills/agent-guild/scripts/ag.py"
+
+# 1. Make sure the guild exists (idempotent — safe even if it already does)
+$AG init <me>
+
+# 2. Find YOUR user-extensible skills dir, then link this skill into it.
+#    Most CLI agents: ~/.<me>/skills/  — GUI apps: see Step 2 below.
+SKILLS_ROOT="$HOME/.<me>/skills"; mkdir -p "$SKILLS_ROOT"
+ln -sfn "$HOME/.agent-guild/skills/agent-guild" "$SKILLS_ROOT/agent-guild"
+
+# 3. Prove your runtime can actually TRIGGER it (list/describe/invoke the skill).
+#    Files on disk ≠ success. If it does not trigger → Step 3's copy/readonly ladder.
+
+# 4. Register yourself
+$AG register <me> "$HOME/.<me>/" symlink "$SKILLS_ROOT"
+
+# 5. Load shared context, then see what of yours belongs in the guild
+$AG bootstrap <me>
+$AG adopt <me>          # DRY-RUN report; add --apply once the user approves
+```
+
+### Windows (PowerShell 5.1+)
+
+```powershell
+$AG = "python `"$env:USERPROFILE\.agent-guild\skills\agent-guild\scripts\ag.py`""
+
+# 1. Bootstrap (idempotent)
+iex "$AG init <me>"
+
+# 2. Link into your own user-extensible skills dir.
+#    Symlinks need Developer Mode or Admin; if denied, use a junction (/J) or copy.
+$SkillsRoot = "$env:USERPROFILE\.<me>\skills"
+New-Item -ItemType Directory -Path $SkillsRoot -Force | Out-Null
+$Target = "$env:USERPROFILE\.agent-guild\skills\agent-guild"
+try {
+    New-Item -ItemType SymbolicLink -Path "$SkillsRoot\agent-guild" -Target $Target -Force | Out-Null
+} catch {
+    cmd /c mklink /J "$SkillsRoot\agent-guild" "$Target"     # junction: no privileges needed
+}
+
+# 3. Trigger test in your own runtime (same rule: triggerable = done)
+
+# 4-5. Register, then load context
+iex "$AG register <me> `"$env:USERPROFILE\.<me>\`" symlink `"$SkillsRoot`""
+iex "$AG bootstrap <me>"
+iex "$AG adopt <me>"
+```
+
+### No shell / no Python (sandboxed or mobile runtime)
+
+Read these files directly at every session start — you still get the whole
+protocol, just without atomic writes:
+`~/.agent-guild/identity/profile.md`, `rules/universal.md`,
+`projects/active.md`, `handoff/shared-state/current-focus.md`.
+Register by hand-editing `registry.json` with `"install_tier": "readonly"`.
+
+Then tell the user which tier you ended on and how you verified it.
+
+**Read the rest of this file only if**: the fast path failed, you can't find
+your skills dir, your runtime refuses links, or you need the full rationale
+and fallback ladder.
+
+---
+
 ## What this file is (and is NOT)
 
 This is the **one-time joining flow** for new agents. It tells you how to:
@@ -26,11 +100,11 @@ This file is **NOT** the runtime skill. The runtime skill (`~/.agent-guild/skill
 
 ## 🚫 ANTI-PATTERN — DO NOT DO THIS
 
-*Real failure case (2026-05-28):* An agent named **Marvis** received the onboarding instruction. Its real user-extensible skills dir was `~/Library/Application Support/<its-own-bundle-id>/.../User/<uuid>/skills/`. It saw `~/.marvis/` didn't exist, then noticed `~/.workbuddy/skills/` already existed (because WorkBuddy installed there), and **symlinked itself into `~/.workbuddy/skills/agent-guild` — polluting another agent's skill list.**
+*Real failure case:* A GUI desktop agent received the onboarding instruction. Its real user-extensible skills dir was buried at `~/Library/Application Support/<its-own-bundle-id>/.../User/<uuid>/skills/`. It saw that `~/.<its-own-name>/` didn't exist, then noticed another agent's `~/.<other-agent>/skills/` *did* exist, and **installed itself into that other agent's directory — polluting a different agent's skill list.**
 
 **Lesson 1 — wrong owner**: never install into a directory that belongs to a different agent. If your `~/.<your-name>/` doesn't exist, that almost always means your skills dir lives elsewhere (Method A/B/C in Step 2), not that you should hijack someone else's home or create a fake one.
 
-**Lesson 2 — wrong tier inside your own runtime**: many agents (Marvis, Cursor, Claude Desktop, ChatGPT Desktop, etc.) have **two** skill locations — a built-in/whitelisted one (read-only, signed) and a user-extensible "Custom Skills" one. **Third-party skills like `agent-guild` MUST go into the user-extensible directory.** Installing into the built-in tier silently fails to load — files exist on disk but the runtime never triggers the skill.
+**Lesson 2 — wrong tier inside your own runtime**: many agents (GUI desktop assistants, IDE forks, MCP-based chat apps, etc.) have **two** skill locations — a built-in/whitelisted one (read-only, signed) and a user-extensible "Custom Skills" one. **Third-party skills like `agent-guild` MUST go into the user-extensible directory.** Installing into the built-in tier silently fails to load — files exist on disk but the runtime never triggers the skill.
 
 **Lesson 3 — install ≠ done**: file on disk is not success. Successful trigger from inside the runtime is success. After installing, you MUST verify the runtime can actually invoke the skill, and walk down the fallback ladder (symlink → copy → readonly) if it cannot.
 
@@ -51,7 +125,7 @@ You must see at least: `identity/  rules/  toolchain/  projects/  log/  handoff/
 If the directory is missing, the user has not run the installer yet. Tell them:
 
 > "I need you to run the Agent Guild installer first:
->   - macOS/Linux: `curl -fsSL https://raw.githubusercontent.com/dqsjqian/agent-guild/main/scripts/install.sh | bash`
+>   - macOS/Linux: `curl -fsSL https://raw.githubusercontent.com/dqsjqian/agent-guild/main/install.sh | bash`
 >   - Windows: `iwr -useb https://raw.githubusercontent.com/dqsjqian/agent-guild/main/install.ps1 | iex`"
 
 Then stop. Re-run this onboarding after they've installed.
@@ -84,11 +158,11 @@ This is the gold standard. Look for terms like "Custom Skills directory", "User 
 | Agent | Likely user-extensible skills root |
 |---|---|
 | Claude Code (CLI) | `~/.claude/skills/` (single tier — no whitelist) |
-| WorkBuddy / CodeBuddy (CLI) | `~/.workbuddy/skills/` ・ `~/.codebuddy/skills/` |
-| Cursor | check Settings → Extensions/Custom path |
-| Marvis (macOS app) | the **"Custom Skills"** dir under `~/Library/Application Support/<bundle-id>/.../User/<uuid>/`, **not** the built-in skills folder shipped inside the .app bundle |
-| ChatGPT / Claude Desktop | the user plugins/MCP path exposed by Settings |
-| Generic CLI agent | `~/.<agent-name>/skills/` |
+| Generic CLI agent | `~/.<agent-name>/skills/` — most CLI agents follow this |
+| Cursor / Windsurf / VS Code forks | check Settings → Extensions / custom rules path |
+| Aider / Cline / Continue | project- or home-level config dir named in their docs |
+| macOS / Windows desktop assistants | a **"Custom Skills"** dir under `~/Library/Application Support/<bundle-id>/…` or `%APPDATA%\<vendor>\…` — **not** the built-in folder inside the .app / install dir |
+| Desktop chat apps (MCP-based) | the user plugins / MCP config path exposed by Settings |
 
 **Method B — Filesystem probe.** Look for a directory whose path or name signals "user/custom/extension", not "built-in/system":
 
@@ -247,7 +321,7 @@ Add or update your entry:
 }
 ```
 
-The `protocol_version` field on your entry is what the runtime skill uses to detect major version drift (see `../SKILL.md` § Self-check). Don't omit it.
+The `protocol_version` field on your entry is what the runtime skill uses to detect major version drift (see `skills/agent-guild/SKILL.md` § Self-check). Don't omit it.
 
 If you can't write to registry.json (no FS permission) → log it and proceed. The protocol still works without registry presence; you just won't be visible to other agents' "who's online" queries, and you'll lose the major-version-drift detection.
 
@@ -266,7 +340,7 @@ The only times you SHOULD come back to this onboarding file:
 
 ---
 
-## Step 6.5 — Where to install / put / use things going forward (recommended convention)
+## Step 6.5 — Where to install / put / use things going forward (default-on convention)
 
 > This is a **lifestyle change**, not a one-time step. From now on, treat `~/.agent-guild/` as your default home for **anything** that should be:
 >
@@ -332,7 +406,7 @@ The convention is a default, not a mandate. Keep data outside `~/.agent-guild/` 
 - The data should be wiped on logout / shared across users / encrypted at rest by an OS service
 - The skill / runtime *requires* a specific path it doesn't control
 
-**This convention is non-normative** — the protocol still works if you ignore this whole step. But adopting it makes the user's life dramatically easier and lets multiple agents collaborate over a shared toolkit.
+**This convention is default-on.** Every joined agent MUST follow it, with one escape hatch: if your runtime *requires* a private location (e.g. a platform-managed skills dir), use the private path and note the reason in `registry.json` — that counts as compliant. Otherwise, ignoring this step is a protocol violation.
 
 ---
 
@@ -421,7 +495,7 @@ If you detect that `~/.agent-guild/skills/agent-guild/manifest.json` has a `prot
 - **A minor or patch bump** (1.0 → 1.1, 1.1 → 1.1.3): just resync per the tier rules above. No re-onboarding needed.
 - **A major bump** (1.x → 2.0): the on-disk schema may have changed in incompatible ways. **Re-read this `ONBOARDING.md` from the top and redo Steps 2-5** (your `SKILLS_ROOT` may stay the same; the install operation needs to re-validate against the new schema). After re-onboarding, update your registry entry's `protocol_version` field.
 
-The runtime skill (`SKILL.md`) will detect a major mismatch on each invocation and refuse to operate, redirecting you here. Don't try to soldier on with a stale install.
+The runtime skill (`skills/agent-guild/SKILL.md`) will detect a major mismatch on each invocation and refuse to operate, redirecting you here. Don't try to soldier on with a stale install.
 
 ### 7.6 — Failed update recovery
 

@@ -13,7 +13,7 @@ set -e
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VERSION="$(grep -E '"skill_version"' "$ROOT/manifest.json" | head -1 | grep -oE '[0-9.]+')"
-[ -n "$VERSION" ] || VERSION="3.0"
+[ -n "$VERSION" ] || VERSION="3.1"
 
 OUT="${1:-$HOME/Downloads/agent-guild-skill-v${VERSION}.zip}"
 STAGE="$(mktemp -d)"
@@ -25,10 +25,14 @@ mkdir -p "$PKG/scripts" "$PKG/docs"
 cp "$ROOT/SKILL.md"      "$PKG/SKILL.md"
 cp "$ROOT/manifest.json" "$PKG/manifest.json"
 cp "$ROOT/LICENSE"       "$PKG/LICENSE"
-cp "$ROOT/scripts/ac.py" "$PKG/scripts/ac.py"
+cp "$ROOT/scripts/ag.py" "$PKG/scripts/ag.py"
+cp "$ROOT/scripts/install.sh"  "$PKG/scripts/install.sh"
+cp "$ROOT/scripts/install.ps1" "$PKG/scripts/install.ps1"
 cp "$ROOT/docs/ONBOARDING.md"  "$PKG/docs/ONBOARDING.md"
 cp "$ROOT/docs/CONVENTIONS.md" "$PKG/docs/CONVENTIONS.md"
 cp "$ROOT/docs/README.md"      "$PKG/docs/README.md"
+cp "$ROOT/docs/README_CN.md"   "$PKG/docs/README_CN.md"
+chmod +x "$PKG/scripts/ag.py" "$PKG/scripts/install.sh" 2>/dev/null || true
 
 mkdir -p "$(dirname "$OUT")"
 rm -f "$OUT"
