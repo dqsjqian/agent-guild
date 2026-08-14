@@ -35,11 +35,16 @@ REPO_RAW_URL="${AGENT_GUILD_REPO:-https://raw.githubusercontent.com/dqsjqian/age
   #   tools/<name>/         shared scripts / utilities (CLI helpers, dotfiles, etc.)
   #   memory/<agent>/       agent-private memory adopted from each runtime
   #   memory/shared/        facts every joined agent should know
-  mkdir -p "$CENTRAL"/{skills/agent-guild/scripts,skills_data,mcp,plugins,tools,memory/shared,identity,rules,toolchain,projects,log/daily,log/decisions,log/archive,handoff/inbox,handoff/archive,handoff/shared-state}
+  mkdir -p "$CENTRAL"/{skills/agent-guild/scripts,skills/agent-guild/docs,skills_data,mcp,plugins,tools,memory/shared,identity,rules,toolchain,projects,log/daily,log/decisions,log/archive,handoff/inbox,handoff/archive,handoff/shared-state}
 
   # Protocol skeleton (always overwrite — controlled by this project)
+  # Docs go BOTH to the central root (user-facing entry points) and into the
+  # skill package (so `ag init` can re-seed the root docs from skills/<pkg>/docs).
   curl -fsSL "$REPO_RAW_URL/docs/ONBOARDING.md"                         -o "$CENTRAL/ONBOARDING.md"
   curl -fsSL "$REPO_RAW_URL/docs/CONVENTIONS.md"                        -o "$CENTRAL/CONVENTIONS.md"
+  curl -fsSL "$REPO_RAW_URL/docs/ONBOARDING.md"  -o "$CENTRAL/skills/agent-guild/docs/ONBOARDING.md"
+  curl -fsSL "$REPO_RAW_URL/docs/CONVENTIONS.md" -o "$CENTRAL/skills/agent-guild/docs/CONVENTIONS.md"
+  curl -fsSL "$REPO_RAW_URL/docs/README.md"      -o "$CENTRAL/skills/agent-guild/docs/README.md"
   curl -fsSL "$REPO_RAW_URL/SKILL.md"         -o "$CENTRAL/skills/agent-guild/SKILL.md"
   curl -fsSL "$REPO_RAW_URL/manifest.json"    -o "$CENTRAL/skills/agent-guild/manifest.json"
   curl -fsSL "$REPO_RAW_URL/scripts/ag.py"                         -o "$CENTRAL/skills/agent-guild/scripts/ag.py"

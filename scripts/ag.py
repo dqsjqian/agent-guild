@@ -317,6 +317,19 @@ def cmd_init(args: list) -> int:
         else:
             skill_status = "MISSING — copy the agent-guild skill package into skills/agent-guild/"
 
+    # Seed the root protocol docs. ONBOARDING.md is the entry point a brand-new
+    # agent is told to read, and CONVENTIONS.md holds the default-on rules — both
+    # MUST exist at the central root after init (install.sh writes them too).
+    for doc in ("ONBOARDING.md", "CONVENTIONS.md"):
+        target = CENTRAL / doc
+        if target.exists():
+            continue
+        for cand in (own_skill / "docs" / doc, skill_src / "docs" / doc):
+            if cand.is_file():
+                target.write_text(cand.read_text(encoding="utf-8"), encoding="utf-8")
+                created_files.append(doc)
+                break
+
     audit("init", {"agent": agent, "fresh": fresh, "dirs": len(created_dirs)})
 
     print(f"{'initialized' if fresh else 'verified'} {CENTRAL}")
