@@ -1,27 +1,23 @@
 ---
 name: agent-guild
 description: |
-  智能体协会（agent-guild）— a local-first, cross-agent shared memory protocol.
-  Any AI agent (Claude Code / Cursor / Copilot / Aider / Cline / Windsurf /
-  desktop assistants / ...) shares one user identity, one set of rules, and
-  coordinated handoffs — no servers, plaintext Markdown + JSON only.
+  智能体协会（agent-guild）— cross-agent shared memory. 本机多个 AI agent 共享
+  同一份身份、规则、记忆与交接消息 — 纯本地 Markdown/JSON，无服务器。
 
-  Capabilities: bootstrap the shared dir (`ag init`); self-audit your own home
-  and move skills/mcp/tools/data/memory into the guild, linked back so your
-  runtime keeps working (`ag adopt`); load all shared context in one shot
-  (`ag bootstrap`); inbox + handoffs; daily log; health check (`ag doctor`).
+  触发（任何自然等价表达都算）：
+  · 身份/习惯："我是谁" "我的身份/习惯/偏好" "who am I" "my routine"
+  · 回忆/历史："你记得吗" "之前聊过" "上次我们" "what did we discuss"
+  · 写记忆："帮我记住" "记一下" "沉淀一下" "remember this" "记到日志"
+  · 跨 agent："告诉其他 agent" "交接给" "让 XX 也知道" "hand off to"
+  · 当前状态："现在在做什么" "当前任务/焦点/进度" "current focus"
+  · 加入："加入协会" "初始化协会" "join agent guild" "install this skill"
 
-  Triggers — before work: "read shared identity", "what's the current focus",
-  "check my inbox", "读共享身份", "当前焦点", "检查收件箱". After work:
-  "log this to agent guild", "记到共享日志", "沉淀一下", "hand off to <agent>",
-  "交接给 <其他 agent>". Setup: "join agent guild", "加入智能体协会",
-  "adopt my skills", "把我的 skill 搬进协会", "数据存哪". Or any equivalent.
-
-  Not joined yet? Run docs/ONBOARDING.md once; this file is the runtime skill.
+  能力：读/写共享身份、规则、焦点；收件箱交接；每日日志；`ag init/adopt/
+  bootstrap/doctor`。未加入？先跑 docs/ONBOARDING.md。
 slug: agent-guild
 displayName: 智能体协会 Agent Guild
 protocol_version: "3.0"
-version: "3.3.0"
+version: "3.3.1"
 license: MIT
 homepage: https://github.com/dqsjqian/agent-guild
 repository: https://github.com/dqsjqian/agent-guild
