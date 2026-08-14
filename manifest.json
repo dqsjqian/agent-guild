@@ -2,7 +2,7 @@
   "$schema": "https://github.com/dqsjqian/agent-guild/raw/main/spec/manifest.schema.json",
   "name": "agent-guild",
   "protocol_version": "3.0",
-  "skill_version": "3.3.1",
+  "skill_version": "3.4.0",
   "spec_url": "https://github.com/dqsjqian/agent-guild/blob/main/docs/SPEC.md",
   "onboarding_url": "https://github.com/dqsjqian/agent-guild/blob/main/docs/ONBOARDING.md",
   "skill_url": "https://github.com/dqsjqian/agent-guild/blob/main/SKILL.md",
@@ -92,6 +92,11 @@
     "doctor": {
       "summary": "Health check across the whole installation: dangling symlinks inside the guild and inside every registered agent's skills_root, stale 'agent-commons' references in live protocol files, and registry drift (recorded home / skills_root no longer exists). Prints concrete fixes. Read-only — never repairs silently.",
       "cmd": "python3 <skill_dir>/scripts/ag.py doctor",
+      "write_mode": "none"
+    },
+    "upgrade": {
+      "summary": "Self-check + auto-update. Queries skillhub / github / clawhub (no auth, any ordinary user can run it) for the newest agent-guild version, reports each source, and picks the newest. Default is dry-run (report only); `--apply` downloads the GitHub release zip and installs it — refreshing the skill package + root docs while preserving ALL user data (identity/rules/log/handoff/skills_data/connectors/memory).",
+      "cmd": "python3 <skill_dir>/scripts/ag.py upgrade [--apply]",
       "write_mode": "none"
     },
     "onboard": {

@@ -16,6 +16,8 @@ Commands:
   adopt --apply [agent]   Move assets into the guild + link back
   bootstrap               Print all shared context (identity/rules/projects/focus)
   doctor                  Health check: broken links, stale paths, version drift
+  upgrade                 Check 3 platforms for a newer skill version (dry-run)
+  upgrade --apply         Download + install the latest version, keep user data
   status                  List registered agents + last_seen
   register <agent> <home> <tier> [skills_root] [caps...]
   last-seen <agent>       Refresh an agent's presence
@@ -35,6 +37,7 @@ Exit codes: 0 ok, 1 error, 2 usage.
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import re
@@ -42,6 +45,9 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import urllib.error
+import urllib.request
+import zipfile
 from datetime import datetime, timezone
 from fnmatch import fnmatch
 from pathlib import Path
@@ -53,8 +59,23 @@ AUDIT = CENTRAL / "log" / "audit.jsonl"
 DAILY = CENTRAL / "log" / "daily"
 INBOX = CENTRAL / "handoff" / "inbox"
 FOCUS = CENTRAL / "handoff" / "shared-state" / "current-focus.md"
+VERSION = CENTRAL / "VERSION"
 
 PROTOCOL_VERSION = "3.0"
+
+# Remote version sources, queried WITHOUT any auth (any ordinary user can
+# self-check). Order is the reporting priority; the newest wins.
+VERSION_SOURCES = [
+    ("skillhub", "https://api.skillhub.cn/api/v1/search?q=agent-guild"),
+    ("github", "https://github.com/dqsjqian/agent-guild/releases/latest"),
+    ("clawhub", "https://clawhub.ai/api/v1/skills/agent-guild/versions"),
+]
+
+# Download source for upgrades — our own GitHub release zip (most stable).
+GITHUB_RELEASE_ZIP = (
+    "https://github.com/dqsjqian/agent-guild/releases/download/"
+    "v{ver}/agent-guild-skill-v{ver}.zip"
+)
 
 # ---------------------------------------------------------------- skeleton ---
 
@@ -340,6 +361,69 @@ def make_link(link: Path, target: Path) -> Tuple[bool, str]:
 
 # ------------------------------------------------------------------- init ---
 
+def read_runtime_version() -> dict:
+    """Read the installed runtime version anchor (~/.agent-guild/VERSION)."""
+    if not VERSION.is_file():
+        return {}
+    out = {}
+    for line in VERSION.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if "=" in line and not line.startswith("#"):
+            k, _, v = line.partition("=")
+            out[k.strip()] = v.strip()
+    return out
+
+
+def write_runtime_version(proto: str, skill: str) -> None:
+    """Persist the applied protocol/skill version to the anchor file."""
+    VERSION.write_text(
+        "# Agent Guild runtime version — managed by `ag init` / `ag upgrade`.\n"
+        "# Records the version last applied to this central dir. Do not edit.\n"
+        f"protocol_version={proto}\n"
+        f"skill_version={skill}\n",
+        encoding="utf-8",
+    )
+
+
+def current_versions(skill_src: Path) -> Tuple[str, str]:
+    """(protocol_version, skill_version) of the skill package `ag` runs from —
+    i.e. the newest version the user has at hand."""
+    m = skill_src / "manifest.json"
+    if m.is_file():
+        try:
+            d = json.loads(m.read_text(encoding="utf-8"))
+            return (d.get("protocol_version", PROTOCOL_VERSION),
+                    d.get("skill_version", "0"))
+        except (OSError, ValueError):
+            pass
+    return (PROTOCOL_VERSION, "0")
+
+
+def _version_gt(a: str, b: str) -> bool:
+    """True if semantic version a > b (e.g. '3.4.0' > '3.3.1')."""
+
+    def parts(v: str) -> list:
+        out = []
+        for seg in str(v).replace("-", ".").split("."):
+            out.append(int(re.sub(r"\D", "", seg) or "0"))
+        return out
+
+    pa, pb = parts(a), parts(b)
+    for x, y in zip(pa, pb):
+        if x != y:
+            return x > y
+    return len(pa) > len(pb)
+
+
+def _replace_tree(src: Path, dst: Path) -> None:
+    """Replace dst with a copy of src (temp dir + atomic-ish rename)."""
+    tmp = dst.with_name(dst.name + ".new")
+    shutil.rmtree(tmp, ignore_errors=True)
+    shutil.copytree(src, tmp)
+    shutil.rmtree(dst, ignore_errors=True)
+    tmp.rename(dst)
+
+
 def cmd_init(args: list) -> int:
     """Bootstrap the central dir. Idempotent: never clobbers existing data."""
     agent = default_agent(args)
@@ -367,42 +451,218 @@ def cmd_init(args: list) -> int:
         })
         created_files.append("registry.json")
 
-    # Make sure the protocol's own skill is present in the shared bus.
+    # Make sure the protocol's own skill is present AND current in the bus.
+    # Version-aware self-heal: compare the version this `ag` runs from against
+    # the installed anchor (~/.agent-guild/VERSION). If the user upgraded the
+    # skill and re-ran init, refresh protocol-owned files (skill package + root
+    # docs) while leaving ALL user data (identity/rules/log/handoff/skills_data/
+    # connectors/memory/registry) untouched.
     own_skill = CENTRAL / "skills" / "agent-guild"
     skill_src = Path(__file__).resolve().parent.parent  # .../skills/agent-guild
-    skill_status = "already present"
-    if not (own_skill / "SKILL.md").exists():
-        if (skill_src / "SKILL.md").exists() and skill_src != own_skill:
+    cur_proto, cur_skill = current_versions(skill_src)
+    inst = read_runtime_version()
+    inst_proto = inst.get("protocol_version", "")
+    inst_skill = inst.get("skill_version", "")
+
+    skill_missing = not (own_skill / "SKILL.md").exists()
+    skill_outdated = bool(inst_skill) and _version_gt(cur_skill, inst_skill)
+    proto_changed = bool(inst_proto) and inst_proto != cur_proto
+    upgrading = skill_outdated or proto_changed
+
+    skill_status = "already current"
+    if skill_missing:
+        if (skill_src / "SKILL.md").is_file() and skill_src.resolve() != own_skill.resolve():
             own_skill.parent.mkdir(parents=True, exist_ok=True)
             shutil.copytree(skill_src, own_skill, dirs_exist_ok=True)
-            skill_status = f"installed from {skill_src}"
+            skill_status = "installed"
         else:
             skill_status = "MISSING — copy the agent-guild skill package into skills/agent-guild/"
+    elif upgrading:
+        if skill_src.resolve() != own_skill.resolve() and (skill_src / "SKILL.md").is_file():
+            _replace_tree(skill_src, own_skill)
+            skill_status = f"upgraded {inst_skill or '?'} → {cur_skill}"
+        else:
+            skill_status = f"anchor bumped to {cur_skill}"
+    elif not inst_skill:
+        skill_status = "anchor repaired"
 
-    # Seed the root protocol docs. ONBOARDING.md is the entry point a brand-new
-    # agent is told to read; CONVENTIONS.md holds the default-on rules; SPEC.md
-    # is the core protocol itself — CONVENTIONS.md and manifest.json reference
-    # it, so all three MUST exist at the central root after init (install.sh
-    # writes them too).
+    write_runtime_version(cur_proto, cur_skill)
+
+    # Seed / refresh the root protocol docs. First run seeds them; an upgrade
+    # follows the version; when already current they are left alone.
     for doc in ("ONBOARDING.md", "CONVENTIONS.md", "SPEC.md"):
         target = CENTRAL / doc
-        if target.exists():
-            continue
+        src = None
         for cand in (own_skill / "docs" / doc, skill_src / "docs" / doc):
             if cand.is_file():
-                target.write_text(cand.read_text(encoding="utf-8"), encoding="utf-8")
-                created_files.append(doc)
+                src = cand
                 break
+        if src is None:
+            continue
+        body = src.read_text(encoding="utf-8")
+        if not target.exists():
+            target.write_text(body, encoding="utf-8")
+            created_files.append(doc)
+        elif upgrading and target.read_text(encoding="utf-8") != body:
+            target.write_text(body, encoding="utf-8")
+            created_files.append(doc)
 
     audit("init", {"agent": agent, "fresh": fresh, "dirs": len(created_dirs)})
 
     print(f"{'initialized' if fresh else 'verified'} {CENTRAL}")
-    print(f"  protocol_version : {PROTOCOL_VERSION}")
+    print(f"  protocol_version : {cur_proto}")
+    print(f"  skill_version    : {cur_skill}")
     print(f"  dirs created     : {len(created_dirs)}" + (f" ({', '.join(created_dirs)})" if created_dirs else ""))
     print(f"  files created    : {len(created_files)}" + (f" ({', '.join(created_files)})" if created_files else ""))
     print(f"  own skill        : {skill_status}")
     print()
     print("Next: `ag adopt <agent>` to see what can move in, then `ag register`.")
+    return 0
+
+
+# ---------------------------------------------------------------- upgrade ---
+
+def _verkey(v: str) -> Tuple[int, ...]:
+    """Semantic-version tuple for comparison."""
+    return tuple(int(re.sub(r"\D", "", seg) or "0")
+                 for seg in str(v).replace("-", ".").split("."))
+
+
+def _http_bytes(url: str, timeout: int = 12) -> bytes:
+    req = urllib.request.Request(url, headers={"User-Agent": "agent-guild"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return r.read()
+
+
+def _http_json(url: str, timeout: int = 12):
+    return json.loads(_http_bytes(url, timeout).decode("utf-8"))
+
+
+def fetch_skillhub_version() -> str:
+    d = _http_json("https://api.skillhub.cn/api/v1/search?q=agent-guild")
+    for x in d.get("results", []):
+        ns = (x.get("namespace") or {}).get("canonicalName", "")
+        if x.get("slug") == "agent-guild" or "agent-guild" in str(ns):
+            v = x.get("version")
+            if v:
+                return str(v)
+    raise LookupError("agent-guild not found on skillhub")
+
+
+def fetch_github_version() -> str:
+    """Get the latest release tag via the releases/latest redirect (no API,
+    no rate limit)."""
+
+    class _NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, hdrs, newurl):
+            return None
+
+    opener = urllib.request.build_opener(_NoRedirect)
+    req = urllib.request.Request(
+        "https://github.com/dqsjqian/agent-guild/releases/latest",
+        headers={"User-Agent": "agent-guild"})
+    try:
+        opener.open(req, timeout=12)
+        raise LookupError("no redirect from releases/latest")
+    except urllib.error.HTTPError as e:
+        if e.code not in (301, 302, 303, 307, 308):
+            raise
+        loc = e.headers.get("Location", "")
+        tag = loc.rstrip("/").rsplit("/", 1)[-1]
+        if not tag or not tag.startswith("v"):
+            raise LookupError(f"unexpected redirect target: {loc}")
+        return tag[1:]
+
+
+def fetch_clawhub_version() -> str:
+    d = _http_json("https://clawhub.ai/api/v1/skills/agent-guild/versions")
+    items = d.get("items", [])
+    if not items or not items[0].get("version"):
+        raise LookupError("no versions on clawhub")
+    return str(items[0]["version"])
+
+
+def _apply_skill_package(skill_src_dir: Path, proto: str, skill: str) -> None:
+    """Replace the central skill package + root docs from skill_src_dir, then
+    bump the VERSION anchor. User-data dirs are never touched."""
+    own_skill = CENTRAL / "skills" / "agent-guild"
+    _replace_tree(skill_src_dir, own_skill)
+    for doc in ("ONBOARDING.md", "CONVENTIONS.md", "SPEC.md"):
+        src = skill_src_dir / "docs" / doc
+        if not src.is_file():
+            continue
+        body = src.read_text(encoding="utf-8")
+        target = CENTRAL / doc
+        if not target.exists() or target.read_text(encoding="utf-8") != body:
+            target.write_text(body, encoding="utf-8")
+    write_runtime_version(proto, skill)
+
+
+def cmd_upgrade(args: list) -> int:
+    """Check the three platforms for a newer version; --apply downloads and
+    installs it (user data preserved)."""
+    apply_ = "--apply" in args
+
+    versions, errors = {}, []
+    for name, fetcher in (("skillhub", fetch_skillhub_version),
+                          ("github", fetch_github_version),
+                          ("clawhub", fetch_clawhub_version)):
+        try:
+            versions[name] = fetcher()
+        except Exception as e:  # network / parse — skip this source
+            errors.append(f"{name}: {e}")
+
+    if not versions:
+        print("could not reach any version source")
+        for e in errors:
+            print(f"  - {e}")
+        return 1
+
+    local = read_runtime_version().get("skill_version", "0")
+    latest_name, latest = max(versions.items(), key=lambda kv: _verkey(kv[1]))
+
+    print("version check:")
+    for name, v in versions.items():
+        mark = "  ← latest" if name == latest_name else ""
+        print(f"  {name:<9} {v}{mark}")
+    print(f"  {'local':<9} {local}")
+    for e in errors:
+        print(f"  (unreachable: {e})")
+
+    if not _version_gt(latest, local):
+        print(f"\nalready up to date ({local}).")
+        return 0
+
+    print(f"\nupdate available: {local} → {latest} (from {latest_name})")
+    if not apply_:
+        print("run `ag upgrade --apply` to download and install.")
+        return 0
+
+    print("downloading ...")
+    try:
+        data = _http_bytes(GITHUB_RELEASE_ZIP.format(ver=latest), timeout=120)
+    except Exception as e:
+        print(f"download failed: {e}")
+        return 1
+
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as z:
+            stage = Path(tempfile.mkdtemp(prefix="ag-upgrade-"))
+            z.extractall(stage)
+        pkg = stage / "agent-guild"
+        if not (pkg / "SKILL.md").is_file():
+            print("apply failed: release zip has unexpected layout")
+            return 1
+        m = json.loads((pkg / "manifest.json").read_text(encoding="utf-8"))
+        new_proto = m.get("protocol_version", PROTOCOL_VERSION)
+        new_skill = m.get("skill_version", latest)
+        _apply_skill_package(pkg, new_proto, new_skill)
+    except Exception as e:
+        print(f"apply failed: {e}")
+        return 1
+
+    print(f"upgraded {local} → {new_skill} (protocol {new_proto}).")
+    print("user data (identity/rules/log/handoff/skills_data/connectors/memory) untouched.")
     return 0
 
 
@@ -934,6 +1194,7 @@ def main() -> int:
         "adopt": cmd_adopt,
         "bootstrap": cmd_bootstrap,
         "doctor": cmd_doctor,
+        "upgrade": cmd_upgrade,
         "status": cmd_status,
         "register": cmd_register,
         "last-seen": cmd_last_seen,

@@ -13,11 +13,12 @@ description: |
   · 加入："加入协会" "初始化协会" "join agent guild" "install this skill"
 
   能力：读/写共享身份、规则、焦点；收件箱交接；每日日志；`ag init/adopt/
-  bootstrap/doctor`。未加入？先跑 docs/ONBOARDING.md。
+  bootstrap/doctor/upgrade`（upgrade 自动从 skillhub/github/clawhub 查最新版并更新）。
+  未加入？先跑 docs/ONBOARDING.md。
 slug: agent-guild
 displayName: 智能体协会 Agent Guild
 protocol_version: "3.0"
-version: "3.3.1"
+version: "3.4.0"
 license: MIT
 homepage: https://github.com/dqsjqian/agent-guild
 repository: https://github.com/dqsjqian/agent-guild
