@@ -66,8 +66,10 @@ $null = & {
     # skill package (so `ag init` can re-seed root docs from skills\<pkg>\docs).
     Download-File "$RepoRawUrl/docs/ONBOARDING.md"                      (Join-Path $Central 'ONBOARDING.md')                          | Out-Null
     Download-File "$RepoRawUrl/docs/CONVENTIONS.md"                     (Join-Path $Central 'CONVENTIONS.md')                         | Out-Null
+    Download-File "$RepoRawUrl/docs/SPEC.md"                            (Join-Path $Central 'SPEC.md')                                | Out-Null
     Download-File "$RepoRawUrl/docs/ONBOARDING.md"  (Join-Path $Central 'skills\agent-guild\docs\ONBOARDING.md')  | Out-Null
     Download-File "$RepoRawUrl/docs/CONVENTIONS.md" (Join-Path $Central 'skills\agent-guild\docs\CONVENTIONS.md') | Out-Null
+    Download-File "$RepoRawUrl/docs/SPEC.md"        (Join-Path $Central 'skills\agent-guild\docs\SPEC.md')        | Out-Null
     Download-File "$RepoRawUrl/SKILL.md"      (Join-Path $Central 'skills\agent-guild\SKILL.md')      | Out-Null
     Download-File "$RepoRawUrl/manifest.json" (Join-Path $Central 'skills\agent-guild\manifest.json') | Out-Null
     Download-File "$RepoRawUrl/scripts/ag.py" (Join-Path $Central 'skills\agent-guild\scripts\ag.py') | Out-Null

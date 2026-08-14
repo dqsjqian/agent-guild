@@ -371,9 +371,11 @@ def cmd_init(args: list) -> int:
             skill_status = "MISSING — copy the agent-guild skill package into skills/agent-guild/"
 
     # Seed the root protocol docs. ONBOARDING.md is the entry point a brand-new
-    # agent is told to read, and CONVENTIONS.md holds the default-on rules — both
-    # MUST exist at the central root after init (install.sh writes them too).
-    for doc in ("ONBOARDING.md", "CONVENTIONS.md"):
+    # agent is told to read; CONVENTIONS.md holds the default-on rules; SPEC.md
+    # is the core protocol itself — CONVENTIONS.md and manifest.json reference
+    # it, so all three MUST exist at the central root after init (install.sh
+    # writes them too).
+    for doc in ("ONBOARDING.md", "CONVENTIONS.md", "SPEC.md"):
         target = CENTRAL / doc
         if target.exists():
             continue

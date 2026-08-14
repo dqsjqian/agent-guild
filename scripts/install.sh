@@ -42,8 +42,10 @@ REPO_RAW_URL="${AGENT_GUILD_REPO:-https://raw.githubusercontent.com/dqsjqian/age
   # skill package (so `ag init` can re-seed the root docs from skills/<pkg>/docs).
   curl -fsSL "$REPO_RAW_URL/docs/ONBOARDING.md"                         -o "$CENTRAL/ONBOARDING.md"
   curl -fsSL "$REPO_RAW_URL/docs/CONVENTIONS.md"                        -o "$CENTRAL/CONVENTIONS.md"
+  curl -fsSL "$REPO_RAW_URL/docs/SPEC.md"                               -o "$CENTRAL/SPEC.md"
   curl -fsSL "$REPO_RAW_URL/docs/ONBOARDING.md"  -o "$CENTRAL/skills/agent-guild/docs/ONBOARDING.md"
   curl -fsSL "$REPO_RAW_URL/docs/CONVENTIONS.md" -o "$CENTRAL/skills/agent-guild/docs/CONVENTIONS.md"
+  curl -fsSL "$REPO_RAW_URL/docs/SPEC.md"        -o "$CENTRAL/skills/agent-guild/docs/SPEC.md"
   curl -fsSL "$REPO_RAW_URL/docs/README.md"      -o "$CENTRAL/skills/agent-guild/docs/README.md"
   curl -fsSL "$REPO_RAW_URL/SKILL.md"         -o "$CENTRAL/skills/agent-guild/SKILL.md"
   curl -fsSL "$REPO_RAW_URL/manifest.json"    -o "$CENTRAL/skills/agent-guild/manifest.json"
