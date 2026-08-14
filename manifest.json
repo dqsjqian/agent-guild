@@ -2,7 +2,7 @@
   "$schema": "https://github.com/dqsjqian/agent-guild/raw/main/spec/manifest.schema.json",
   "name": "agent-guild",
   "protocol_version": "3.0",
-  "skill_version": "3.2.2",
+  "skill_version": "3.3.0",
   "spec_url": "https://github.com/dqsjqian/agent-guild/blob/main/docs/SPEC.md",
   "onboarding_url": "https://github.com/dqsjqian/agent-guild/blob/main/docs/ONBOARDING.md",
   "skill_url": "https://github.com/dqsjqian/agent-guild/blob/main/SKILL.md",
@@ -32,7 +32,8 @@
       "memory/shared/": "cross-agent facts worth sharing with every joined agent",
       "mcp/<server>/": "shared MCP server configs / local implementations (e.g. an MCP server installed once, used by every joined agent)",
       "plugins/<name>/": "shared plugins (browser/editor/IDE extensions, etc.)",
-      "tools/<name>/": "shared scripts and CLI utilities (helpers users want available across all agents)"
+      "tools/<name>/": "shared scripts and CLI utilities (helpers users want available across all agents)",
+      "connectors/<name>/": "connector credentials + config (login cookies, API keys, lock files) — manually placed, never auto-adopted; gitignored by default"
     },
     "_note_convention_layer": "Agent Guild does NOT read, write, validate, or interpret anything in the convention layer. It belongs entirely to the skills/MCPs/plugins/tools that own each subdirectory. Skills following this convention get free backup/sync semantics — when the user backs up ~/.agent-guild/, all participating skills come along."
   },
@@ -79,7 +80,7 @@
       "write_mode": "create_if_missing"
     },
     "adopt": {
-      "summary": "Self-audit the calling agent's home for assets that belong in the guild (skills / skills_data / mcp / tools / memory), then move them in and symlink back so the runtime keeps working. DEFAULT IS DRY-RUN — prints a candidate report and changes nothing; only `--apply` executes. Excludes rebuildable caches (.venv/node_modules/__pycache__), credential stores, runtime-internal bookkeeping (agent-created-skills.json etc.), platform-managed packages (__skillhub/connector-*) and connector-backed skills. Every move is verified after linking and automatically rolled back on failure. Deletions go to trash, never rm.",
+      "summary": "Self-audit the calling agent's home for assets that belong in the guild (skills / skills_data / mcp / tools / memory), then move them in and symlink back so the runtime keeps working. DEFAULT IS DRY-RUN — prints a candidate report and changes nothing; only `--apply` executes. Excludes rebuildable caches (.venv/node_modules/__pycache__/browsers, *.app/*.pid/*.log/*.pyc), credential stores (config.json etc.), runtime-internal bookkeeping (agent-created-skills.json etc.), platform-managed packages (__skillhub/connector-*) and connector-backed skills. Credentials are NEVER adopted (connectors/ is manually placed). Every move is verified after linking and automatically rolled back on failure. Deletions go to trash, never rm.",
       "cmd": "python3 <skill_dir>/scripts/ag.py adopt <agent> [--apply]",
       "write_mode": "move_and_symlink"
     },
@@ -156,6 +157,8 @@
     "where_to_install_mcp_servers": "If you install or configure an MCP server that should be shared with all joined agents (not bound to a single agent's runtime), MUST place its config under ~/.agent-guild/mcp/<server-name>/.",
     "where_to_drop_plugins": "Shared plugins (e.g. agent-agnostic browser/editor extensions) belong under ~/.agent-guild/plugins/<name>/.",
     "where_to_drop_tools": "Shared CLI scripts / utilities the user might run from any shell session belong under ~/.agent-guild/tools/<name>/.",
+    "where_to_put_connector_credentials": "Connector credentials (login cookies, API keys, OAuth tokens, lock files) MUST go under ~/.agent-guild/connectors/<connector-name>/, NOT skills_data/ — skills_data/ is for skill user data. connectors/ is manually placed, never auto-adopted, and gitignored by default so credentials stay local to the machine.",
+    "naming": "Every subdirectory under skills/, skills_data/, and connectors/ MUST use a lowercase-hyphenated name ([a-z0-9-], e.g. qq-mail, agent-browser). No CJK characters, no spaces, no '-skill' suffix — the directory name is the identity, not a display label.",
     "privacy_layering": "If a skill writes mixed-sensitivity data, split into ~/.agent-guild/skills_data/<skill>/public/ vs .../private/ so users can apply different .gitignore policies (see CONVENTIONS.md)."
   },
   "principles": [
@@ -167,7 +170,8 @@
     "Convention over framework: ≤200 LOC of code; the README is the product",
     "Self-onboarding: agents install themselves, the protocol does not push code to them",
     "Triggerable = done: install is only complete when the runtime can actually invoke the skill",
-    "Convention layer is default-on: skills/skills_data/mcp/plugins/tools are the default locations (escape hatch: runtime-forced private paths, noted in registry)"
+    "Convention layer is default-on: skills/skills_data/mcp/plugins/tools are the default locations (escape hatch: runtime-forced private paths, noted in registry)",
+    "Naming: lowercase-hyphenated ([a-z0-9-]) for every skills/ skills_data/ connectors/ subdir — no CJK, no spaces, no '-skill' suffix"
   ],
   "supported_agents": [
     "Any AI agent that can read filesystem and follow natural-language instructions. Symlink support is preferred but not required (copy and readonly fallbacks exist)."

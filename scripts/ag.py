@@ -62,7 +62,7 @@ SKELETON = [
     "identity", "rules", "toolchain", "projects",
     "handoff/inbox", "handoff/archive", "handoff/shared-state",
     "log/daily", "log/decisions",
-    "skills", "skills_data", "mcp", "plugins", "tools", "memory",
+    "skills", "skills_data", "mcp", "plugins", "tools", "memory", "connectors",
 ]
 
 PLACEHOLDERS = {
@@ -82,6 +82,9 @@ PLACEHOLDERS = {
 # --------------------------------------------------------------- adoption ---
 
 # Where each asset class lands inside the guild.
+# Note: `connectors` (credential store) is deliberately NOT adoptable — it is a
+# manually-placed directory. Adopt must never auto-move credentials into a
+# directory the user backs up.
 ADOPT_DESTS = {
     "skills": "skills",
     "skills_data": "skills_data",
@@ -95,11 +98,15 @@ ADOPT_DESTS = {
 EXCLUDE_NAMES = {
     ".venv", "venv", "node_modules", "__pycache__", ".git", ".DS_Store",
     ".env", "secrets", "cache", ".cache", "tmp", ".tmp", "dist", "build",
+    "browsers",  # Playwright / Puppeteer browser binaries — rebuildable
     "agent-guild", "agent-commons",
     # runtime-internal metadata: owned by the host, not portable skills
     "agent-created-skills.json", "_bm_skillid_migration.json",
     "settings.json", "config.json", "mcp.json", ".skill-lock.json",
 }
+
+# Rebuildable binaries and runtime artifacts: adopt nothing with these suffixes.
+EXCLUDE_SUFFIXES = (".app", ".pid", ".log", ".pyc", ".tmp")
 
 # Platform-managed / vendor-wired packages: moving them breaks the host.
 EXCLUDE_SUBSTRINGS = ("__skillhub", "connector-", "-connector", "marketplace",
@@ -123,6 +130,8 @@ HOST_WIRED_MARKERS = (
 ADOPTIGNORE = ".adoptignore"
 
 # Candidate locations per agent home, by asset class.
+# `connectors` is intentionally absent: credentials are manually placed, never
+# auto-adopted (see ADOPT_DESTS note above).
 CANDIDATE_LAYOUT = {
     "skills": ["skills"],
     "skills_data": ["skills_data", "skill_data"],
@@ -429,6 +438,8 @@ def _is_excluded(name: str, kind: str = "") -> bool:
     if name in EXCLUDE_NAMES:
         return True
     if any(s in name for s in EXCLUDE_SUBSTRINGS):
+        return True
+    if name.endswith(EXCLUDE_SUFFIXES):
         return True
     for pat in _user_ignores():
         if fnmatch(name, pat):

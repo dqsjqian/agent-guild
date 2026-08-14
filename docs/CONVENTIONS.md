@@ -37,7 +37,7 @@ The `skills/` directory is **not** just where Agent Guild keeps its own runtime 
 
 - **Joined agents SHOULD prefer `~/.agent-guild/skills/<name>/` over installing a private copy.** If a user wants the wechat-publisher skill, install it once into the central bus; every agent then symlinks/copies/reads from there using the same Tier-1/2/3 install pattern from `ONBOARDING.md` Step 3.
 - **Each skill subdirectory is owned by that skill.** Agent Guild does NOT validate or interpret its contents.
-- **Naming**: pick a stable lowercase slug that matches the skill's GitHub / ClawHub identity to avoid collisions.
+- **Naming** (MUST): lowercase-hyphenated slug `[a-z0-9-]` (e.g. `qq-mail`, `agent-browser`, `wecom-doc-to-html`). No CJK characters, no spaces, no `-skill` suffix — the directory name is the identity, not a display label. The same rule applies to `skills_data/` and `connectors/` subdirectories.
 - **Discovery**: agents looking for a capability the user has previously installed SHOULD check `~/.agent-guild/skills/` first before asking the user to install something.
 
 ### Why this matters
@@ -95,6 +95,8 @@ Skills that hold **mixed-sensitivity data** SHOULD split into clearly named subd
 
 This is default-on, not optional. The point is: **make it easy for users to back up safely without surprising them**.
 
+> **Credentials are NOT skill data.** Login cookies, API keys, OAuth tokens and lock files belong under `~/.agent-guild/connectors/<name>/` (Convention 6), not here — `skills_data/` is for a skill's user-facing data, and mixing secrets into it defeats the whole point of having a clean backup root.
+
 ### Default `.gitignore` template
 
 If the user wants to version-control `~/.agent-guild/` for personal multi-device sync via private git, this is a sensible starting point:
@@ -109,6 +111,16 @@ skills_data/*/cache/
 # Common scratch / log paths some skills use
 skills_data/*/tmp/
 skills_data/*/.tmp/
+
+# Rebuildable binaries / dependency trees — never sync these
+skills_data/*/browsers/
+skills_data/*/node_modules/
+skills_data/*/.venv/
+**/*.app
+**/*.pid
+
+# Connector credentials — stay local, never in git
+connectors/
 ```
 
 ## Convention 2 — Skill metadata file (optional)
@@ -156,7 +168,26 @@ For helper scripts and small utilities the user (or any agent) might run from an
 
 The user MAY add `~/.agent-guild/tools/*/bin/` to `$PATH` if they want shell-level access. This is a user convenience, not a protocol requirement.
 
-## Convention 6 — Conventions are default-on; protocol stays versioned
+## Convention 6 — Connector credentials
+
+> **Default location for connector credentials: `~/.agent-guild/connectors/<connector-name>/`**
+
+Login cookies, API keys, OAuth tokens, CLI lock files — anything a connector or integration uses to authenticate — belong under `connectors/<name>/`, **not** `skills_data/`. `skills_data/` is for a skill's user-facing data; credentials are a different category with different handling:
+
+- **Manually placed, never auto-adopted.** `ag adopt` will not move credentials into the guild (moving secrets into a directory the user backs up is a risk, not a benefit). You place them there yourself.
+- **Gitignored by default.** The `.gitignore` template above excludes `connectors/` entirely, so credentials never leak into a private git mirror or an accidental public push.
+- **Naming**: same lowercase-hyphenated slug as `skills/` and `skills_data/`.
+
+```
+~/.agent-guild/connectors/
+├── qq-mail/config.json       ← login credentials for the qq-mail connector
+├── clawhub/lock.json         ← publish lock / session state
+└── <other-connector>/...
+```
+
+If a credential must be kept *outside* the guild entirely (e.g. OS keychain, a runtime-managed secret store), that is a legitimate escape hatch — note it in `registry.json` just like any other runtime-forced private path.
+
+## Convention 7 — Conventions are default-on; protocol stays versioned
 
 **Conventions in this file are default-on, not optional** (escape hatch documented at the top). The *protocol* layer (`SPEC.md`) remains intentionally small and stable — a change to hard protocol requirements still goes through a normal versioned spec bump, not by quietly rewording a convention.
 
@@ -174,7 +205,8 @@ If you build a skill that wants to read another skill's `skills_data/`, that's b
 | 3 — Shared MCP | `~/.agent-guild/mcp/<name>/` | Agent-agnostic MCP servers | Any agent that wires up to them |
 | 4 — Shared plugins | `~/.agent-guild/plugins/<name>/` | Cross-agent plugins (browser/editor/IDE extensions) | Any compatible host |
 | 5 — Shared CLI tools | `~/.agent-guild/tools/<name>/` | Scripts / utilities runnable from any shell | Anyone — agent or human |
-| 6 — Default-on, versioned | — | Conventions are default-on; hard protocol changes stay versioned | — |
+| 6 — Connector credentials | `~/.agent-guild/connectors/<name>/` | Login cookies / API keys / lock files (gitignored) | The owning connector |
+| 7 — Default-on, versioned | — | Conventions are default-on; hard protocol changes stay versioned | — |
 
 ---
 
