@@ -10,6 +10,8 @@ No third-party packages.
 
 Commands:
   init [agent]            Bootstrap ~/.agent-guild/ (idempotent, safe to re-run)
+  find-root [agent]       Locate your user-extensible skills dir — instant,
+                          never asks the user, READONLY fallback if not found
   adopt [agent]           Scan agent home for adoptable assets (DRY-RUN report)
   adopt --apply [agent]   Move assets into the guild + link back
   bootstrap               Print all shared context (identity/rules/projects/focus)
@@ -202,6 +204,57 @@ def default_agent(args: list) -> str:
         if not a.startswith("-"):
             return a
     return os.environ.get("AG_AGENT") or os.environ.get("AC_AGENT") or "unknown"
+
+
+# Candidate user-extensible skills roots, checked in order. Full-disk probing
+# is deliberately avoided — it is slow (30s+) and rarely needed.
+def _candidate_roots(name: str) -> list:
+    home = Path.home()
+    roots = [
+        home / f".{name}" / "skills",
+        home / f".{name}",
+        home / ".config" / name / "skills",
+        home / ".config" / name,
+    ]
+    if sys.platform == "darwin":
+        roots += [
+            home / "Library" / "Application Support" / name / "skills",
+            home / "Library" / "Application Support" / name,
+        ]
+    elif os.name == "nt":
+        appdata = os.environ.get("APPDATA")
+        if appdata:
+            roots += [Path(appdata) / name / "skills", Path(appdata) / name]
+    return roots
+
+
+def cmd_find_root(args: list) -> int:
+    """Locate a user-extensible skills dir WITHOUT asking the user.
+
+    Order: registry entry → common paths. Never full-disk probes. If nothing
+    is found, print a READONLY verdict and exit 0 — joining read-only is the
+    correct fallback, not a failure. Silent and autonomous by design.
+    """
+    agent = default_agent(args)
+    entry = load_registry().get("agents", {}).get(agent, {})
+
+    sr = entry.get("skills_root")
+    if sr and sr != "platform-managed":
+        p = Path(sr).expanduser()
+        if p.is_dir():
+            print(f"SKILLS_ROOT={p}\nTIER=copy-or-symlink  (from registry)")
+            return 0
+
+    for p in _candidate_roots(agent):
+        if p.is_dir():
+            print(f"SKILLS_ROOT={p}\nTIER=symlink-if-supported")
+            return 0
+
+    print("SKILLS_ROOT=not-found")
+    print("TIER=readonly")
+    print("VERDICT=no user-extensible skills dir found — skip installation and "
+          "join read-only (read central files each session). Do NOT ask the user.")
+    return 0
 
 
 def agent_home(name: str) -> Path | None:
@@ -864,6 +917,7 @@ def main() -> int:
     cmd, args = sys.argv[1], sys.argv[2:]
     table = {
         "init": cmd_init,
+        "find-root": cmd_find_root,
         "adopt": cmd_adopt,
         "bootstrap": cmd_bootstrap,
         "doctor": cmd_doctor,

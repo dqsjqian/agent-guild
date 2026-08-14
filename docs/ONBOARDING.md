@@ -21,21 +21,29 @@ AG="python3 $HOME/.agent-guild/skills/agent-guild/scripts/ag.py"
 # 1. Make sure the guild exists (idempotent — safe even if it already does)
 $AG init <me>
 
-# 2. Find YOUR user-extensible skills dir, then link this skill into it.
-#    Most CLI agents: ~/.<me>/skills/  — GUI apps: see Step 2 below.
-SKILLS_ROOT="$HOME/.<me>/skills"; mkdir -p "$SKILLS_ROOT"
-ln -sfn "$HOME/.agent-guild/skills/agent-guild" "$SKILLS_ROOT/agent-guild"
+# 2. Locate YOUR user-extensible skills dir — instant, never asks the user.
+#    SKILLS_ROOT=<path>  → install below
+#    SKILLS_ROOT=not-found → skip installation, join read-only (step 4)
+$AG find-root <me>
+#    (no ag available? check these directly:
+#     ~/.<me>/skills  ~/.<me>  ~/.config/<me>/skills — take the first that exists)
+SKILLS_ROOT="$HOME/.<me>/skills"
+[ -d "$SKILLS_ROOT" ] && ln -sfn "$HOME/.agent-guild/skills/agent-guild" "$SKILLS_ROOT/agent-guild"
 
 # 3. Prove your runtime can actually TRIGGER it (list/describe/invoke the skill).
-#    Files on disk ≠ success. If it does not trigger → Step 3's copy/readonly ladder.
+#    Files on disk ≠ success. If it does not trigger → copy tier, then read-only.
 
-# 4. Register yourself
+# 4. Register yourself (readonly tier if you had to skip installation)
 $AG register <me> "$HOME/.<me>/" symlink "$SKILLS_ROOT"
+#   no skills dir → $AG register <me> "$HOME/.<me>/" readonly platform-managed
 
 # 5. Load shared context, then see what of yours belongs in the guild
 $AG bootstrap <me>
 $AG adopt <me>          # DRY-RUN report; add --apply once the user approves
 ```
+
+> **Silent by design.** Never stall to ask the user where your skills dir is.
+> If you can't find it, join read-only — you still get the whole protocol.
 
 ### Windows (PowerShell 5.1+)
 
@@ -45,20 +53,20 @@ $AG = "python `"$env:USERPROFILE\.agent-guild\skills\agent-guild\scripts\ag.py`"
 # 1. Bootstrap (idempotent)
 iex "$AG init <me>"
 
-# 2. Link into your own user-extensible skills dir.
-#    Symlinks need Developer Mode or Admin; if denied, use a junction (/J) or copy.
+# 2. Locate your skills dir (instant, never asks) — SKILLS_ROOT=not-found →
+#    skip installation, register readonly (below)
+iex "$AG find-root <me>"
 $SkillsRoot = "$env:USERPROFILE\.<me>\skills"
-New-Item -ItemType Directory -Path $SkillsRoot -Force | Out-Null
-$Target = "$env:USERPROFILE\.agent-guild\skills\agent-guild"
-try {
-    New-Item -ItemType SymbolicLink -Path "$SkillsRoot\agent-guild" -Target $Target -Force | Out-Null
-} catch {
-    cmd /c mklink /J "$SkillsRoot\agent-guild" "$Target"     # junction: no privileges needed
+if (Test-Path $SkillsRoot) {
+    # Symlinks need Developer Mode or Admin; if denied, use a junction (/J) or copy.
+    $Target = "$env:USERPROFILE\.agent-guild\skills\agent-guild"
+    try { New-Item -ItemType SymbolicLink -Path "$SkillsRoot\agent-guild" -Target $Target -Force | Out-Null }
+    catch { cmd /c mklink /J "$SkillsRoot\agent-guild" "$Target" }
 }
 
 # 3. Trigger test in your own runtime (same rule: triggerable = done)
 
-# 4-5. Register, then load context
+# 4-5. Register (readonly if no skills dir), then load context
 iex "$AG register <me> `"$env:USERPROFILE\.<me>\`" symlink `"$SkillsRoot`""
 iex "$AG bootstrap <me>"
 iex "$AG adopt <me>"
@@ -164,26 +172,46 @@ This is the gold standard. Look for terms like "Custom Skills directory", "User 
 | macOS / Windows desktop assistants | a **"Custom Skills"** dir under `~/Library/Application Support/<bundle-id>/…` or `%APPDATA%\<vendor>\…` — **not** the built-in folder inside the .app / install dir |
 | Desktop chat apps (MCP-based) | the user plugins / MCP config path exposed by Settings |
 
-**Method B — Filesystem probe.** Look for a directory whose path or name signals "user/custom/extension", not "built-in/system":
+**Method B — Check the likely spots (instant). Do NOT ask the user. Do NOT full-disk `find ~`.**
+
+> ⚠️ **Never full-disk `find ~` to locate your skills dir** — on a real home
+> directory it walks hundreds of thousands of files and takes **30s+**. That
+> is the #1 reason agents look like they "join slowly". Check the obvious
+> spots, and if nothing is there, **skip installation and join read-only.**
+> Silent and autonomous: the user should never have to wait on this step.
+
+**B1. Instant direct checks.** Most CLI agents live at `~/.<agent-name>/`:
 
 ```bash
-# POSIX
-find ~ -maxdepth 7 -type d 2>/dev/null \
-  | grep -iE "(custom[-_ ]?skills|user[-_ ]?skills|user[-_ ]?plugins|extensions)" \
-  | grep -iE "<your-agent-name>" | head -20
-```
-```powershell
-# Windows
-Get-ChildItem -Path $env:USERPROFILE,$env:APPDATA,$env:LOCALAPPDATA `
-  -Recurse -Depth 6 -Directory -ErrorAction SilentlyContinue `
-  | Where-Object { $_.FullName -match "(?i)<your-agent-name>.*(custom|user|plugin|extension)" }
+for p in "$HOME/.<your-agent-name>/skills" "$HOME/.<your-agent-name>" \
+         "$HOME/.config/<your-agent-name>/skills" "$HOME/.config/<your-agent-name>"; do
+  [ -d "$p" ] && echo "found: $p"
+done
 ```
 
-If you find both built-in and user/custom dirs under your agent's tree, **always pick the user/custom one**.
+**B2. If `ag` is available, one command does the same, faster:**
 
-**Method C — Ask the user.**
-If A and B both fail, ask **once**:
-> "I need to install the Agent Guild skill where your runtime can actually load it (the *user-extensible* / *custom skills* directory, not the built-in one). I'm not sure which path that is for me. Could you tell me, or point me at the relevant setting?"
+```bash
+python3 ~/.agent-guild/skills/agent-guild/scripts/ag.py find-root <your-agent-name>
+# SKILLS_ROOT=<path> → install there
+# SKILLS_ROOT=not-found → skip installation, join read-only
+```
+
+**B3. Not found? JOIN READ-ONLY. Do not ask, do not probe deeper.**
+
+You cannot install the skill into a runtime you can't find a skills dir for.
+That is fine — read the protocol files directly each session instead:
+
+- `~/.agent-guild/ONBOARDING.md` (this file, once)
+- `~/.agent-guild/skills/agent-guild/SKILL.md` (every session, or on demand)
+- Register yourself in `registry.json` with `"install_tier": "readonly"`
+
+You still get the full protocol (identity, rules, handoffs, daily log) — just
+without a runtime-loaded skill. Nothing is lost by joining read-only.
+
+**There is no "ask the user" step.** The join must complete silently and
+autonomously. If you cannot find a skills dir, join read-only — never stall
+waiting for the user to help you locate your own runtime.
 
 ### Hard rules before you write anything
 
@@ -260,7 +288,7 @@ Pick the strongest available signal. Document which one you used in your final a
 | Symptom | Likely cause | Action |
 |---|---|---|
 | Symlink installed, runtime's skill list doesn't show `agent-guild` | Runtime sandbox refuses symlink traversal (common on macOS app sandboxes) | Remove symlink, switch to Tier 2 (copy). Retest. |
-| Copy installed, still not in skill list | Wrong tier (built-in vs user-extensible) | Roll back, redo Step 2 Method C. Retest. |
+| Copy installed, still not in skill list | Wrong tier (built-in vs user-extensible) | Roll back, retry B1 spots; exhausted → join read-only |
 | In skill list, description empty / parse error | Manifest format mismatch (your runtime needs different frontmatter) | Build a runtime-specific shim, or drop to Tier 3. |
 | Path forbidden by sandbox / SIP / TCC | Runtime can never load files from this directory | Find a different user-extensible path; if none → Tier 3. |
 | All three tiers fail | Runtime fundamentally cannot load third-party skills | Honest report (Section D). |
@@ -529,7 +557,7 @@ If the trigger test ultimately failed → use the **Section D honest report** te
 If a step fails, KEEP GOING. Don't silently abandon. Report what failed, complete what's possible.
 
 - Step 1 fails (no central dir) → tell user to install, stop.
-- Step 2 fails (can't find your own user-extensible skills dir) → ask the user (Method C) **once**, don't fall back to "install somewhere plausible".
+- Step 2 fails (can't find your own user-extensible skills dir) → **join read-only**. Do not ask the user, do not install "somewhere plausible" into another agent's tree.
 - Step 3 installed in another agent's directory → roll back, redo Step 2.
 - Step 4 trigger test fails → walk the ladder per Section C. Don't fake success.
 - Step 4 ladder fully exhausted → Section D honest report. Readonly is the practical mode going forward.
