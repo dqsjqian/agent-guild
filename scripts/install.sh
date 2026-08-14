@@ -47,6 +47,7 @@ REPO_RAW_URL="${AGENT_GUILD_REPO:-https://raw.githubusercontent.com/dqsjqian/age
   curl -fsSL "$REPO_RAW_URL/docs/CONVENTIONS.md" -o "$CENTRAL/skills/agent-guild/docs/CONVENTIONS.md"
   curl -fsSL "$REPO_RAW_URL/docs/SPEC.md"        -o "$CENTRAL/skills/agent-guild/docs/SPEC.md"
   curl -fsSL "$REPO_RAW_URL/docs/README.md"      -o "$CENTRAL/skills/agent-guild/docs/README.md"
+  curl -fsSL "$REPO_RAW_URL/docs/README_CN.md"   -o "$CENTRAL/skills/agent-guild/docs/README_CN.md"
   curl -fsSL "$REPO_RAW_URL/SKILL.md"         -o "$CENTRAL/skills/agent-guild/SKILL.md"
   curl -fsSL "$REPO_RAW_URL/manifest.json"    -o "$CENTRAL/skills/agent-guild/manifest.json"
   curl -fsSL "$REPO_RAW_URL/scripts/ag.py"                         -o "$CENTRAL/skills/agent-guild/scripts/ag.py"
