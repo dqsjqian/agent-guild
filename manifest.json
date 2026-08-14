@@ -2,7 +2,7 @@
   "$schema": "https://github.com/dqsjqian/agent-guild/raw/main/spec/manifest.schema.json",
   "name": "agent-guild",
   "protocol_version": "3.0",
-  "skill_version": "3.4.0",
+  "skill_version": "3.4.1",
   "spec_url": "https://github.com/dqsjqian/agent-guild/blob/main/docs/SPEC.md",
   "onboarding_url": "https://github.com/dqsjqian/agent-guild/blob/main/docs/ONBOARDING.md",
   "skill_url": "https://github.com/dqsjqian/agent-guild/blob/main/SKILL.md",
@@ -90,7 +90,7 @@
       "write_mode": "none"
     },
     "doctor": {
-      "summary": "Health check across the whole installation: dangling symlinks inside the guild and inside every registered agent's skills_root, stale 'agent-commons' references in live protocol files, and registry drift (recorded home / skills_root no longer exists). Prints concrete fixes. Read-only — never repairs silently.",
+      "summary": "Health check across the whole installation: dangling symlinks inside the guild and inside every registered agent's skills_root, missing core protocol files, registry drift (recorded home / skills_root no longer exists), and protocol-version drift (agent joined under an older major version than central). Prints concrete fixes. Read-only — never repairs silently.",
       "cmd": "python3 <skill_dir>/scripts/ag.py doctor",
       "write_mode": "none"
     },

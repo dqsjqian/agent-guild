@@ -229,11 +229,11 @@ def read_stdin() -> str:
 
 
 def default_agent(args: list) -> str:
-    """Agent name from argv, else $AG_AGENT / $AC_AGENT, else 'unknown'."""
+    """Agent name from argv, else $AG_AGENT, else 'unknown'."""
     for a in args:
         if not a.startswith("-"):
             return a
-    return os.environ.get("AG_AGENT") or os.environ.get("AC_AGENT") or "unknown"
+    return os.environ.get("AG_AGENT") or "unknown"
 
 
 # Candidate user-extensible skills roots, checked in order. Full-disk probing
@@ -1088,7 +1088,7 @@ def cmd_send(args: list) -> int:
     if not body:
         print("empty message body", file=sys.stderr)
         return 2
-    src = os.environ.get("AG_AGENT") or os.environ.get("AC_AGENT", "unknown")
+    src = os.environ.get("AG_AGENT") or "unknown"
     safe_topic = re.sub(r"[^A-Za-z0-9._-]", "-", topic)
     fname = f"from-{src}-to-{dst}-{safe_topic}.md"
     atomic_append(INBOX / fname, body)
