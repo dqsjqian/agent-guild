@@ -1,11 +1,13 @@
 # Agent Guild Specification
 
-**Protocol version: 2.0**
+**Protocol version: 3.0**
 **Status: Draft**
 
 This document is the normative specification for Agent Guild. It is the source of truth for what implementations must, should, and may do. The keywords **MUST**, **SHOULD**, **MAY** follow [RFC 2119](https://www.rfc-editor.org/rfc/rfc2119).
 
 > **Changes from 1.0 → 2.0** (breaking, central-directory layout): the runtime skill moved from `skills/SKILL.md` to `SKILL.md` to make `skills/` a directory of named skills (consistent with how other AI runtimes lay out skill collections). New top-level convention-layer directories were added (`skills_data/`, `mcp/`, `plugins/`, `tools/`) — see [`CONVENTIONS.md`](CONVENTIONS.md). Agents joined under 1.x **MUST** re-onboard.
+
+> **Changes from 2.0 → 3.0** (breaking, self-bootstrapping): the guild now bootstraps itself. `ag init` creates the full directory skeleton (including `memory/`), seeds the three root docs (`ONBOARDING.md` / `CONVENTIONS.md` / `SPEC.md`), and installs its own skill — no installer needed. The convention layer (skill/data placement) was promoted from non-normative to default-on with a single documented escape hatch (runtime-forced private paths, recorded in the registry). Agents joined under 2.x **MUST** re-onboard; `ag doctor` reports this drift explicitly.
 
 ## 1. Goals
 
@@ -123,7 +125,7 @@ Skills that adopt the convention **SHOULD** isolate mixed-sensitivity data into 
 
 - **Format**: Single JSON object (see [`manifest.json`](../manifest.json) for shape).
 - **Update mode**: In-place edit. Agents **MUST** update only their own entry.
-- **Required fields per agent**: `joined_at` (ISO 8601), `home` (~/.<agent>/), `last_seen` (ISO 8601), `protocol_version` (the version the agent joined under, copied from `manifest.json` at join time; **MUST** be `"2.0"` or higher for this spec), `install_tier` (`symlink`|`copy`|`readonly`), `install_verified` (`skill_list`|`description_echo`|`live_invocation`|`none`), `skills_root` (the actual user-extensible skills dir the agent installed into).
+- **Required fields per agent**: `joined_at` (ISO 8601), `home` (~/.<agent>/), `last_seen` (ISO 8601), `protocol_version` (the version the agent joined under, copied from `manifest.json` at join time; **MUST** be `"3.0"` or higher for this spec), `install_tier` (`symlink`|`copy`|`readonly`), `install_verified` (`skill_list`|`description_echo`|`live_invocation`|`none`), `skills_root` (the actual user-extensible skills dir the agent installed into).
 - **Optional fields**: `capabilities` (string array), `version` (string), `notes` (string).
 
 ## 4. Onboarding vs. runtime — two decoupled flows
@@ -192,8 +194,8 @@ The active version **MUST** be declared in `SKILL.md` frontmatter and `manifest.
 
 ### 5.4 Major-version-bump handling
 
-- **Same major version** (e.g. agent joined under 1.0, central is 1.2): agents MAY continue operating; resync per tier rules above.
-- **Higher major version on central** (agent joined under 1.x, central is 2.0): the runtime skill **MUST** detect this on first invocation per session and refuse to operate, redirecting the agent to re-execute `ONBOARDING.md` from the top. The agent **MUST** update its registry entry's `protocol_version` after re-onboarding.
+- **Same major version** (e.g. agent joined under 3.0, central is 3.2): agents MAY continue operating; resync per tier rules above.
+- **Higher major version on central** (agent joined under 2.x, central is 3.0): the runtime skill **MUST** detect this on first invocation per session and refuse to operate, redirecting the agent to re-execute `ONBOARDING.md` from the top. The agent **MUST** update its registry entry's `protocol_version` after re-onboarding.
 
 ### 5.5 Update trigger heuristics (non-normative)
 
