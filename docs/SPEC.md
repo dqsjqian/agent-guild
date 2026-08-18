@@ -1,6 +1,6 @@
 # Agent Guild Specification
 
-**Protocol version: 3.0**
+**Protocol version: 3.1**
 **Status: Draft**
 
 This document is the normative specification for Agent Guild. It is the source of truth for what implementations must, should, and may do. The keywords **MUST**, **SHOULD**, **MAY** follow [RFC 2119](https://www.rfc-editor.org/rfc/rfc2119).
@@ -8,6 +8,8 @@ This document is the normative specification for Agent Guild. It is the source o
 > **Changes from 1.0 → 2.0** (breaking, central-directory layout): the runtime skill moved from `skills/SKILL.md` to `SKILL.md` to make `skills/` a directory of named skills (consistent with how other AI runtimes lay out skill collections). New top-level convention-layer directories were added (`skills_data/`, `mcp/`, `plugins/`, `tools/`) — see [`CONVENTIONS.md`](CONVENTIONS.md). Agents joined under 1.x **MUST** re-onboard.
 
 > **Changes from 2.0 → 3.0** (breaking, self-bootstrapping): the guild now bootstraps itself. `ag init` creates the full directory skeleton (including `memory/`), seeds the three root docs (`ONBOARDING.md` / `CONVENTIONS.md` / `SPEC.md`), and installs its own skill — no installer needed. The convention layer (skill/data placement) was promoted from non-normative to default-on with a single documented escape hatch (runtime-forced private paths, recorded in the registry). Agents joined under 2.x **MUST** re-onboard; `ag doctor` reports this drift explicitly.
+
+> **Changes from 3.0 → 3.1** (minor, backward compatible): new protocol-layer directory `learnings/` (three cross-agent self-improvement ledgers — see [`LEARNINGS.md`](LEARNINGS.md)) and new CLI commands `ag learn` / `ag review` / `ag resolve`. Agents joined under 3.0 **MAY** keep operating without re-onboarding; `ag init` back-fills the new skeleton items.
 
 ## 1. Goals
 
@@ -60,6 +62,10 @@ The central directory contains TWO layers, physically siblings but semantically 
 │   ├── daily/          ← per-agent per-day logs (append-only)
 │   ├── decisions/      ← ADR-style decision records
 │   └── archive/        ← rotated old logs
+├── learnings/          ← cross-agent self-improvement ledgers (3.1+)
+│   ├── LEARNINGS.md    ← corrections / knowledge gaps / best practices
+│   ├── ERRORS.md       ← command & integration failures
+│   └── FEATURE_REQUESTS.md ← capabilities requested but missing
 ├── handoff/
 │   ├── inbox/          ← cross-agent direct messages
 │   ├── archive/        ← processed messages
@@ -127,6 +133,15 @@ Skills that adopt the convention **SHOULD** isolate mixed-sensitivity data into 
 - **Update mode**: In-place edit. Agents **MUST** update only their own entry.
 - **Required fields per agent**: `joined_at` (ISO 8601), `home` (~/.<agent>/), `last_seen` (ISO 8601), `protocol_version` (the version the agent joined under, copied from `manifest.json` at join time; **MUST** be `"3.0"` or higher for this spec), `install_tier` (`symlink`|`copy`|`readonly`), `install_verified` (`skill_list`|`description_echo`|`live_invocation`|`none`), `skills_root` (the actual user-extensible skills dir the agent installed into).
 - **Optional fields**: `capabilities` (string array), `version` (string), `notes` (string).
+
+### 3.8 `learnings/*.md` — cross-agent self-improvement ledgers (3.1+)
+
+- **Files**: `LEARNINGS.md` / `ERRORS.md` / `FEATURE_REQUESTS.md`, seeded by `ag init` with headers only (never overwritten).
+- **Write mode**: New entries are **append-only**. Entry IDs follow `TYPE-YYYYMMDD-XXX` (`LRN-`/`ERR-`/`FEAT-`). Every entry **MUST** carry a `By:` attribution line naming the capturing agent.
+- **Collaborative resolution**: Any agent **MAY** update an entry's `Status` field and append a `Resolution` block — that is the only permitted edit to existing entries. History beyond status/resolution **MUST NOT** be rewritten.
+- **Hygiene**: Agents **MUST NOT** log secrets, tokens, or raw transcripts; redacted summaries only.
+- **Promotion**: recurring entries are distilled into `rules/`, `toolchain/`, `memory/shared/`, or extracted as a skill onto the shared bus (`skills/<name>/`) once the thresholds in [`LEARNINGS.md`](LEARNINGS.md) are met.
+- **Specification**: [`LEARNINGS.md`](LEARNINGS.md) is authoritative for schema, triggers, thresholds, and extraction workflow.
 
 ## 4. Onboarding vs. runtime — two decoupled flows
 

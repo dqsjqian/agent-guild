@@ -24,6 +24,11 @@ Commands:
   send <dst> <topic>      Write an inbox message from stdin
   log <agent> <title>     Append a daily log entry from stdin
   focus <agent> <title>   Update current-focus from stdin
+  learn <agent> <kind> "<summary>"   Learning-ledger entry (details from stdin)
+                          kind: learning | error | featreq
+                          opts: --area A --priority P --category C --pattern-key K
+  review                  Ledger stats: pending items + promotion candidates
+  resolve <ID> [note ...] Mark a ledger entry resolved (+ resolution note)
   audit [n]               Show last n audit lines (default 20)
   prune [days]            List agents idle > N days (default 30) — never deletes
 
@@ -60,8 +65,21 @@ DAILY = CENTRAL / "log" / "daily"
 INBOX = CENTRAL / "handoff" / "inbox"
 FOCUS = CENTRAL / "handoff" / "shared-state" / "current-focus.md"
 VERSION = CENTRAL / "VERSION"
+LEARNINGS = CENTRAL / "learnings"
 
-PROTOCOL_VERSION = "3.0"
+PROTOCOL_VERSION = "3.1"
+
+# Learning ledger: kind -> (file, ID prefix). Protocol 3.1+.
+LEDGERS = {
+    "learning": ("learnings/LEARNINGS.md", "LRN"),
+    "error": ("learnings/ERRORS.md", "ERR"),
+    "featreq": ("learnings/FEATURE_REQUESTS.md", "FEAT"),
+}
+LEDGER_ALIASES = {
+    "learn": "learning", "insight": "learning",
+    "err": "error", "bug": "error",
+    "feat": "featreq", "feature": "featreq", "fr": "featreq",
+}
 
 # Remote version sources, queried WITHOUT any auth (any ordinary user can
 # self-check). Order is the reporting priority; the newest wins.
@@ -82,7 +100,7 @@ GITHUB_RELEASE_ZIP = (
 SKELETON = [
     "identity", "rules", "toolchain", "projects",
     "handoff/inbox", "handoff/archive", "handoff/shared-state",
-    "log/daily", "log/decisions",
+    "log/daily", "log/decisions", "learnings",
     "skills", "skills_data", "mcp", "plugins", "tools", "memory", "connectors",
 ]
 
@@ -97,6 +115,26 @@ PLACEHOLDERS = {
         "Cross-agent memory. Agent-private memory files adopted from each\n"
         "runtime live under `memory/<agent>/`; facts worth sharing across all\n"
         "agents go in `memory/shared/`.\n"
+    ),
+    "learnings/LEARNINGS.md": (
+        "# Learnings\n\n"
+        "Cross-agent ledger: corrections, knowledge gaps, best practices.\n"
+        "Entries are append-only; only Status/Resolution may be edited later.\n"
+        "Never log secrets — redacted summaries only.\n\n"
+        "**Categories**: correction | insight | knowledge_gap | best_practice\n"
+        "**Statuses**: pending | in_progress | resolved | wont_fix | promoted | promoted_to_skill\n\n"
+        "---\n"
+    ),
+    "learnings/ERRORS.md": (
+        "# Errors\n\n"
+        "Cross-agent ledger: command failures, integration errors, unexpected\n"
+        "behavior. Redacted excerpts only — no secrets, no raw transcripts.\n\n"
+        "---\n"
+    ),
+    "learnings/FEATURE_REQUESTS.md": (
+        "# Feature Requests\n\n"
+        "Cross-agent ledger: capabilities the user wanted but nothing provides.\n\n"
+        "---\n"
     ),
 }
 
@@ -416,10 +454,12 @@ def _version_gt(a: str, b: str) -> bool:
 
 
 def _replace_tree(src: Path, dst: Path) -> None:
-    """Replace dst with a copy of src (temp dir + atomic-ish rename)."""
+    """Replace dst with a copy of src (temp dir + atomic-ish rename).
+    VCS / OS noise and caches are never copied."""
+    ignore = shutil.ignore_patterns(".git", ".DS_Store", "__pycache__", ".venv")
     tmp = dst.with_name(dst.name + ".new")
     shutil.rmtree(tmp, ignore_errors=True)
-    shutil.copytree(src, tmp)
+    shutil.copytree(src, tmp, ignore=ignore)
     shutil.rmtree(dst, ignore_errors=True)
     tmp.rename(dst)
 
@@ -904,6 +944,25 @@ def cmd_bootstrap(args: list) -> int:
                    if p.name != "universal.md") if (CENTRAL / "rules").is_dir() else []
     if extra:
         print(f"\nOther rules (read on demand): {', '.join(extra)}")
+
+    # Learning-ledger pending summary (protocol 3.1+)
+    led = []
+    for path in _ledger_files():
+        if not path.exists():
+            continue
+        entries = _parse_entries(path.read_text(encoding="utf-8"))
+        n_open = sum(1 for e in entries
+                     if _field(e, "Status") in ("", "pending", "in_progress"))
+        if n_open:
+            top = next((e for e in entries
+                        if _field(e, "Status") in ("", "pending", "in_progress")
+                        and _field(e, "Priority") in ("high", "critical")), None)
+            hint = f" — top: {top['id']} {_summary_of(top)}" if top else ""
+            led.append(f"{path.stem} {n_open} open{hint}")
+    if led:
+        print(f"\nLearning ledger (learnings/): {' | '.join(led)}")
+        print("  fix what you touch (ag resolve), promote what recurs (ag review).")
+
     print(f"\n{shown}/{len(BOOTSTRAP_FILES)} context files loaded.")
     return 0
 
@@ -1140,6 +1199,235 @@ def cmd_focus(args: list) -> int:
     return 0
 
 
+# --------------------------------------------------------------- learnings ---
+
+# Entry header pattern: "## [LRN-20260818-003] category"
+_ENTRY_RE = re.compile(r"^## \[((?:LRN|ERR|FEAT)-\d{8}-[A-Za-z0-9]{3})\]\s*(.*)$", re.M)
+
+
+def _ledger_files() -> list:
+    return [CENTRAL / rel for rel, _ in LEDGERS.values()]
+
+
+def _parse_entries(text: str) -> list:
+    """Split a ledger file into structured entries (id, category, block)."""
+    out = []
+    matches = list(_ENTRY_RE.finditer(text))
+    for i, m in enumerate(matches):
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        block = text[m.start():end]
+        out.append({"id": m.group(1), "category": m.group(2).strip(), "block": block})
+    return out
+
+
+def _field(entry: dict, name: str) -> str:
+    m = re.search(rf"^\*\*{re.escape(name)}\*\*:\s*(.+)$", entry["block"], re.M)
+    return m.group(1).strip() if m else ""
+
+
+def _summary_of(entry: dict) -> str:
+    m = re.search(r"^### Summary\s*\n+\s*(.+)$", entry["block"], re.M)
+    return m.group(1).strip() if m else "(no summary)"
+
+
+def _next_id(path: Path, prefix: str) -> str:
+    day = datetime.now().strftime("%Y%m%d")
+    used = set()
+    if path.exists():
+        for e in _parse_entries(path.read_text(encoding="utf-8")):
+            if e["id"].startswith(f"{prefix}-{day}-"):
+                used.add(e["id"].rsplit("-", 1)[-1])
+    n = 1
+    while f"{n:03d}" in used:
+        n += 1
+    return f"{prefix}-{day}-{n:03d}"
+
+
+def _opt(args: list, name: str, default: str = "") -> str:
+    """Extract --name VALUE from args (and remove both from the list)."""
+    if name in args:
+        i = args.index(name)
+        if i + 1 < len(args):
+            val = args[i + 1]
+            del args[i:i + 2]
+            return val
+        args.remove(name)
+    return default
+
+
+def cmd_learn(args: list) -> int:
+    """Append a structured entry to a learning ledger (details from stdin)."""
+    area = _opt(args, "--area", "")
+    priority = _opt(args, "--priority", "medium")
+    category = _opt(args, "--category", "")
+    pattern_key = _opt(args, "--pattern-key", "")
+    rest = [a for a in args if not a.startswith("-")]
+    if len(rest) < 3:
+        print('usage: ag learn <agent> <learning|error|featreq> "<summary>" '
+              "[--area A] [--priority low|medium|high|critical] "
+              "[--category C] [--pattern-key K]  (details from stdin)",
+              file=sys.stderr)
+        return 2
+    agent, kind, summary = rest[0], rest[1].lower(), rest[2]
+    kind = LEDGER_ALIASES.get(kind, kind)
+    if kind not in LEDGERS:
+        print(f"unknown kind '{kind}' — use learning | error | featreq", file=sys.stderr)
+        return 2
+    if not CENTRAL.exists():
+        print(f"{CENTRAL} missing — run `ag init` first", file=sys.stderr)
+        return 1
+
+    rel, prefix = LEDGERS[kind]
+    path = CENTRAL / rel
+    if not path.exists():  # older central dir — back-fill header
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(PLACEHOLDERS.get(rel, "# ledger\n\n---\n"), encoding="utf-8")
+
+    # Recurrence detection: same Pattern-Key logged before?
+    see_also = ""
+    if pattern_key and path.exists():
+        prior = [e["id"] for e in _parse_entries(path.read_text(encoding="utf-8"))
+                 if re.search(rf"Pattern-Key:\s*{re.escape(pattern_key)}\s*$",
+                              e["block"], re.M)]
+        if prior:
+            see_also = ", ".join(prior)
+            print(f"recurrence: Pattern-Key '{pattern_key}' seen in {see_also} "
+                  f"— linking via See Also; promotion threshold may now be met (ag review).")
+
+    entry_id = _next_id(path, prefix)
+    body = read_stdin() or "(no details provided)"
+
+    if kind == "error":
+        detail = f"### Error\n```\n{body}\n```"
+    elif kind == "featreq":
+        detail = f"### Requested Capability\n{summary}\n\n### User Context\n{body}"
+    else:
+        detail = f"### Details\n{body}"
+        if not category:
+            category = "insight"
+
+    meta = [f"- Source: conversation",
+            f"- Related Files: ",
+            f"- Tags: "]
+    if see_also:
+        meta.append(f"- See Also: {see_also}")
+    if pattern_key:
+        meta.append(f"- Pattern-Key: {pattern_key}")
+
+    if kind == "learning":
+        heading_cat = category or "insight"
+    elif kind == "error":
+        heading_cat = category or "error"
+    else:
+        heading_cat = category or "request"
+    entry = (
+        f"\n## [{entry_id}] {heading_cat}\n\n"
+        f"**Logged**: {now_iso()}\n"
+        f"**By**: {agent}\n"
+        f"**Priority**: {priority}\n"
+        f"**Status**: pending\n"
+        f"**Area**: {area or 'unspecified'}\n\n"
+        f"### Summary\n{summary}\n\n"
+        f"{detail}\n\n"
+        f"### Suggested Action\n(none yet)\n\n"
+        f"### Metadata\n" + "\n".join(meta) + "\n\n---\n"
+    )
+    atomic_append(path, entry)
+    audit("learn", {"agent": agent, "id": entry_id, "kind": kind,
+                    "pattern_key": pattern_key or None})
+    print(f"logged {entry_id} -> {rel} (by {agent}, priority={priority})")
+    print("next: fix it later with `ag resolve " + entry_id + "`, "
+          "or distill recurring ones via `ag review`.")
+    return 0
+
+
+def cmd_resolve(args: list) -> int:
+    """Set an entry's Status to resolved + append a Resolution block."""
+    if not args:
+        print("usage: ag resolve <ENTRY-ID> [note ...]", file=sys.stderr)
+        return 2
+    entry_id = args[0].strip("[]")
+    note = " ".join(args[1:]).strip() or "resolved"
+    agent = os.environ.get("AG_AGENT") or "unknown"
+
+    for path in _ledger_files():
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8")
+        entries = _parse_entries(text)
+        for e in entries:
+            if e["id"] != entry_id:
+                continue
+            block = e["block"]
+            if "**Status**: resolved" in block:
+                print(f"{entry_id} is already resolved")
+                return 0
+            new_block, n = re.subn(r"^\*\*Status\*\*:\s*\S+",
+                                   "**Status**: resolved", block, count=1, flags=re.M)
+            if n == 0:
+                new_block = block.replace("### Summary",
+                                          "**Status**: resolved\n\n### Summary", 1)
+            new_block = new_block.rstrip("\n") + (
+                f"\n\n### Resolution\n- **Resolved**: {now_iso()}\n"
+                f"- **By**: {agent}\n- **Notes**: {note}\n\n---\n")
+            new_text = text.replace(block, new_block, 1)
+            fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".ag-", suffix=".tmp")
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(new_text)
+            os.replace(tmp, path)
+            audit("resolve", {"agent": agent, "id": entry_id})
+            print(f"resolved {entry_id} in {path.relative_to(CENTRAL)}")
+            return 0
+    print(f"entry '{entry_id}' not found in any ledger "
+          f"(searched learnings/*.md)", file=sys.stderr)
+    return 1
+
+
+def cmd_review(args: list) -> int:
+    """Ledger overview: pending stats, high-priority items, promotion candidates."""
+    any_file = False
+    for path in _ledger_files():
+        if not path.exists():
+            continue
+        any_file = True
+        entries = _parse_entries(path.read_text(encoding="utf-8"))
+        if not entries:
+            continue
+        open_items = [e for e in entries
+                      if _field(e, "Status") in ("", "pending", "in_progress")]
+        print(f"== {path.relative_to(CENTRAL)} — {len(entries)} entries, "
+              f"{len(open_items)} open ==")
+        hot = [e for e in open_items if _field(e, "Priority") in ("high", "critical")]
+        for e in hot:
+            print(f"  [{_field(e, 'Priority'):<8}] {e['id']}  {_summary_of(e)}"
+                  f"  (by {_field(e, 'By') or '?'})")
+        if not hot and open_items:
+            print(f"  ({len(open_items)} open, none high/critical)")
+        if not open_items:
+            print("  (all resolved/promoted)")
+
+        # Pattern-Key recurrence groups -> promotion candidates
+        groups = {}
+        for e in entries:
+            m = re.search(r"^- Pattern-Key:\s*(\S+)\s*$", e["block"], re.M)
+            if m:
+                groups.setdefault(m.group(1), []).append(e)
+        for key, es in sorted(groups.items()):
+            hits, agents = len(es), {_field(e, "By") for e in es}
+            if hits >= 3 or (hits >= 2 and len(agents) >= 2):
+                print(f"  PROMOTION CANDIDATE: Pattern-Key '{key}' — "
+                      f"{hits} hits by {len(agents)} agents "
+                      f"({', '.join(sorted(a or '?' for a in agents))})")
+                print(f"    -> distill into rules/ / toolchain/ / memory/shared/, "
+                      f"or extract a skill onto skills/ (docs/LEARNINGS.md)")
+        print()
+
+    if not any_file:
+        print("no ledgers found — run `ag init` to create learnings/")
+        return 1
+    return 0
+
+
 def cmd_audit(args: list) -> int:
     n = int(args[0]) if args and args[0].isdigit() else 20
     if not AUDIT.exists():
@@ -1201,6 +1489,9 @@ def main() -> int:
         "send": cmd_send,
         "log": cmd_log,
         "focus": cmd_focus,
+        "learn": cmd_learn,
+        "review": cmd_review,
+        "resolve": cmd_resolve,
         "audit": cmd_audit,
         "prune": cmd_prune,
     }

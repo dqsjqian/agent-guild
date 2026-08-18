@@ -1,8 +1,8 @@
 {
   "$schema": "https://github.com/dqsjqian/agent-guild/raw/main/spec/manifest.schema.json",
   "name": "agent-guild",
-  "protocol_version": "3.0",
-  "skill_version": "3.4.1",
+  "protocol_version": "3.1",
+  "skill_version": "3.5.0",
   "spec_url": "https://github.com/dqsjqian/agent-guild/blob/main/docs/SPEC.md",
   "onboarding_url": "https://github.com/dqsjqian/agent-guild/blob/main/docs/ONBOARDING.md",
   "skill_url": "https://github.com/dqsjqian/agent-guild/blob/main/SKILL.md",
@@ -21,6 +21,7 @@
       "projects/": "active projects",
       "handoff/": "shared-state + inbox + archive",
       "log/": "daily logs (per-agent) + decisions + archive",
+      "learnings/": "cross-agent self-improvement ledgers: LEARNINGS.md (corrections/gaps/best practices) + ERRORS.md (failures) + FEATURE_REQUESTS.md (missing capabilities) — see docs/LEARNINGS.md (protocol 3.1+)",
       "registry.json": "agent presence + install metadata",
       "ONBOARDING.md": "one-time joining flow",
       "CONVENTIONS.md": "default-on conventions (this file)"
@@ -40,6 +41,7 @@
   "files": {
     "onboarding_entry": "docs/ONBOARDING.md",
     "conventions": "docs/CONVENTIONS.md",
+    "learning_ledger_spec": "docs/LEARNINGS.md",
     "skill_entry": "SKILL.md",
     "manifest": "manifest.json",
     "identity_profile": "identity/profile.md",
@@ -56,6 +58,10 @@
     "shared_state": "handoff/shared-state/current-focus.md",
     "daily_log_pattern": "log/daily/{YYYY-MM-DD}-{agent-name}.md",
     "decision_pattern": "log/decisions/{YYYY-MM-DD}-{title}.md",
+    "learnings_ledger": "learnings/LEARNINGS.md",
+    "errors_ledger": "learnings/ERRORS.md",
+    "feature_requests_ledger": "learnings/FEATURE_REQUESTS.md",
+    "learning_entry_id_pattern": "{LRN|ERR|FEAT}-{YYYY-MM-DD}-{XXX}",
     "inbox_pattern": "handoff/inbox/from-{src}-to-{dst}-{topic}.md"
   },
   "lifecycle": {
@@ -107,6 +113,21 @@
       "summary": "Append Markdown note to log/daily/YYYY-MM-DD-<agent>.md",
       "write_mode": "append",
       "per_agent_file": true
+    },
+    "learn": {
+      "summary": "Append a structured entry to the cross-agent learning ledger (learnings/LEARNINGS.md | ERRORS.md | FEATURE_REQUESTS.md). Auto-assigns the TYPE-YYYYMMDD-XXX id, stamps By: <agent>, detects recurrence via --pattern-key, and links similar entries with See Also. Never logs secrets — redacted summaries only.",
+      "cmd": "python3 <skill_dir>/scripts/ag.py learn <agent> <learning|error|featreq> \"<summary>\" [--area A] [--priority P] [--pattern-key K] [--category C] (details from stdin)",
+      "write_mode": "append"
+    },
+    "review": {
+      "summary": "Ledger review: pending counts per file, high/critical open items, and Pattern-Key recurrence groups that reached the promotion threshold (>=3 total, or >=2 hits from >=2 distinct agents). Run before major tasks and after finishing features; resolve what you fixed, promote what recurs.",
+      "cmd": "python3 <skill_dir>/scripts/ag.py review",
+      "write_mode": "none"
+    },
+    "resolve": {
+      "summary": "Mark a ledger entry resolved (Status: pending -> resolved + Resolution block with agent + timestamp + note). Any agent may resolve any entry — agent A logs, agent B fixes.",
+      "cmd": "python3 <skill_dir>/scripts/ag.py resolve <ENTRY-ID> [note]",
+      "write_mode": "edit_in_place"
     },
     "update_rules": {
       "summary": "Edit rules/*.md or toolchain/*.md with local-replace, never Write/overwrite",

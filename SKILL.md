@@ -12,13 +12,15 @@ description: |
   · 当前状态："现在在做什么" "当前任务/焦点/进度" "current focus"
   · 加入："加入协会" "初始化协会" "join agent guild" "install this skill"
 
-  能力：读/写共享身份、规则、焦点；收件箱交接；每日日志；`ag init/adopt/
-  bootstrap/doctor/upgrade`（upgrade 自动从 skillhub/github/clawhub 查最新版并更新）。
+  能力：读/写共享身份、规则、焦点；收件箱交接；每日日志；跨 agent 学习台账
+  （错误/纠正/特性请求 → 复发追踪 → 晋升规则或萃取共享 skill）；`ag init/adopt/
+  bootstrap/doctor/upgrade/learn/review/resolve`（upgrade 自动从 skillhub/github/
+  clawhub 查最新版并更新）。
   未加入？先跑 docs/ONBOARDING.md。
 slug: agent-guild
 displayName: 智能体协会 Agent Guild
-protocol_version: "3.0"
-version: "3.4.1"
+protocol_version: "3.1"
+version: "3.5.0"
 license: MIT
 homepage: https://github.com/dqsjqian/agent-guild
 repository: https://github.com/dqsjqian/agent-guild
@@ -89,6 +91,10 @@ python3 <SKILL_DIR>/scripts/ag.py bootstrap <your-agent-name>
 
 跨 agent 有价值的事实 → 也写 `memory/shared/`；只对你自己有意义的 → 留在 `memory/<你的名字>/`。
 
+**踩坑/被纠正/发现更好做法 → 同时记学习台账**（Capability 8，`ag learn`）。
+用户纠正了你・命令非预期失败・用户想要不存在的能力・发现某任务更优解 ——
+这些是全 guild 的免疫素材，别只留在当天日志里。**绝不记录 secrets/原始报文**，摘录要脱敏。
+
 ### M3 — Route skills & data into the guild (default-on)
 
 - **装新 skill**：MUST 装到 `~/.agent-guild/skills/<name>/`，再从那里软链回自己 runtime（symlink → copy → readonly 降级，见 ONBOARDING.md Step 3）。
@@ -144,6 +150,11 @@ $AG last-seen <agent>               # refresh presence
 echo "<body>" | $AG send <dst> <topic>        # handoff message
 echo "<body>" | $AG log <agent> "<title>"     # daily log
 echo "<body>" | $AG focus <agent> "<title>"   # update current-focus
+echo "<body>" | $AG learn <agent> <kind> "<summary>"  # learning ledger entry
+                                             #   kind: learning|error|featreq
+                                             #   opts: --area X --priority Y --pattern-key K
+$AG review                          # pending stats + promotion candidates
+$AG resolve <ID> ["note"]           # mark entry resolved (+ note)
 $AG audit                           # audit trail of shared writes
 $AG prune 30                        # list idle agents
 ```
@@ -204,6 +215,31 @@ New skill / MCP / plugin / tool / persistent data you install → **MUST** go un
 
 写之前先读：别把别人已经记过的东西重复记一遍。
 
+## Capability 8 — Learning ledger (self-improvement loop)
+
+三本跨 agent 台账在 `~/.agent-guild/learnings/`：`LEARNINGS.md`（纠正/知识盲区/最佳实践）·
+`ERRORS.md`（命令/集成失败）· `FEATURE_REQUESTS.md`（用户想要但不存在的能力）。
+完整规范（schema/触发词/晋升阈值/萃取流程）：`docs/LEARNINGS.md`（权威）。
+
+**触发速查**：
+
+| 情况 | 动作 |
+|---|---|
+| 命令失败/异常/超时 | `ag learn <agent> error "<summary>"` |
+| 用户纠正你（"不对"/"其实是"/"you're wrong"） | `ag learn <agent> learning "<summary>"`（category correction） |
+| 你的知识过时 / API 行为和认知不符 | 同上（knowledge_gap） |
+| 发现更好做法 | 同上（best_practice） |
+| 用户想要不存在的能力 | `ag learn <agent> featreq "<summary>"` |
+
+**复发追踪**：相同 `Pattern-Key` 的条目跨 agent 计数；`ag review` 报告达到阈值的组。
+
+**晋升**（达到阈值后 MUST，详见 docs/LEARNINGS.md）：
+行为/偏好 → `rules/<topic>.md`；工具坑 → `toolchain/<tool>.md` 或 `memory/shared/`；
+通用可复用解法 → 萃取为 skill 放 `skills/<name>/`（共享 skill bus，全 agent 即刻可用），
+条目状态改 `promoted` / `promoted_to_skill`。
+
+**红线**：不记 secrets/token/原始报文；条目只增不改，仅 `Status`/`Resolution` 可由任何 agent 更新。
+
 ## Failure modes
 
 - Some files missing → read what exists, note the rest, don't block.
@@ -215,5 +251,6 @@ New skill / MCP / plugin / tool / persistent data you install → **MUST** go un
 - Manifest: `manifest.json`
 - Onboarding (one-time): `docs/ONBOARDING.md`
 - Conventions: `docs/CONVENTIONS.md`
+- Learning ledger (self-improvement): `docs/LEARNINGS.md`
 - Repository: https://github.com/dqsjqian/agent-guild
 - License: MIT
