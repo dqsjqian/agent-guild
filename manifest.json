@@ -1,8 +1,8 @@
 {
   "$schema": "https://github.com/dqsjqian/agent-guild/raw/main/spec/manifest.schema.json",
   "name": "agent-guild",
-  "protocol_version": "3.1",
-  "skill_version": "3.5.0",
+  "protocol_version": "3.2",
+  "skill_version": "3.6.0",
   "spec_url": "https://github.com/dqsjqian/agent-guild/blob/main/docs/SPEC.md",
   "onboarding_url": "https://github.com/dqsjqian/agent-guild/blob/main/docs/ONBOARDING.md",
   "skill_url": "https://github.com/dqsjqian/agent-guild/blob/main/SKILL.md",
@@ -91,9 +91,9 @@
       "write_mode": "move_and_symlink"
     },
     "bootstrap": {
-      "summary": "One-shot read of all shared session context: identity/profile.md, identity/ROUTINE.md, rules/universal.md, projects/active.md, handoff/shared-state/current-focus.md, plus this agent's unread inbox and a list of other rules files to read on demand. Read-only — run this at session start instead of opening five files by hand.",
+      "summary": "One-shot read of all shared session context: identity/profile.md, identity/ROUTINE.md, rules/universal.md, projects/active.md, handoff/shared-state/current-focus.md, plus this agent's unread inbox and a list of other rules files to read on demand. Read-only except a rate-limited auto-groom at the end (protocol 3.2+): at most once per groom_interval_hours, it archives expired data per RETENTION.md — never deletes anything, never fails bootstrap.",
       "cmd": "python3 <skill_dir>/scripts/ag.py bootstrap <agent>",
-      "write_mode": "none"
+      "write_mode": "auto_groom"
     },
     "doctor": {
       "summary": "Health check across the whole installation: dangling symlinks inside the guild and inside every registered agent's skills_root, missing core protocol files, registry drift (recorded home / skills_root no longer exists), and protocol-version drift (agent joined under an older major version than central). Prints concrete fixes. Read-only — never repairs silently.",
@@ -192,6 +192,7 @@
     "Plaintext only: Markdown + JSON, readable and editable by hand",
     "Per-agent file isolation in writes (avoid conflicts at the source)",
     "Append-only logs, edit-in-place state",
+    "Data hygiene is built-in: groom archives expired data, never deletes it (protocol 3.2+)",
     "Onboarding and runtime are decoupled — onboarding is a one-time action, the skill is an ongoing capability",
     "Convention over framework: ≤200 LOC of code; the README is the product",
     "Self-onboarding: agents install themselves, the protocol does not push code to them",

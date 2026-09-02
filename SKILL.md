@@ -10,17 +10,20 @@ description: |
   · 写记忆："帮我记住" "记一下" "沉淀一下" "remember this" "记到日志"
   · 跨 agent："告诉其他 agent" "交接给" "让 XX 也知道" "hand off to"
   · 当前状态："现在在做什么" "当前任务/焦点/进度" "current focus"
+  · 数据卫生："整理一下协会" "清理过期数据" "协会瘦身/归档" "防止数据劣化"
+    "groom" "cleanup" "archive old data"
   · 加入："加入协会" "初始化协会" "join agent guild" "install this skill"
 
   能力：读/写共享身份、规则、焦点；收件箱交接；每日日志；跨 agent 学习台账
-  （错误/纠正/特性请求 → 复发追踪 → 晋升规则或萃取共享 skill）；`ag init/adopt/
-  bootstrap/doctor/upgrade/learn/review/resolve`（upgrade 自动从 skillhub/github/
-  clawhub 查最新版并更新）。
+  （错误/纠正/特性请求 → 复发追踪 → 晋升规则或萃取共享 skill）；数据卫生
+  （bootstrap 后自动 groom：过期日志/焦点/台账归档、审计轮转，防数据劣化）；
+  `ag init/adopt/bootstrap/doctor/groom/upgrade/learn/review/resolve`（upgrade
+  自动从 skillhub/github/clawhub 查最新版并更新）。
   未加入？先跑 docs/ONBOARDING.md。
 slug: agent-guild
 displayName: 智能体协会 Agent Guild
-protocol_version: "3.1"
-version: "3.5.0"
+protocol_version: "3.2"
+version: "3.6.0"
 license: MIT
 homepage: https://github.com/dqsjqian/agent-guild
 repository: https://github.com/dqsjqian/agent-guild
@@ -155,6 +158,8 @@ echo "<body>" | $AG learn <agent> <kind> "<summary>"  # learning ledger entry
                                              #   opts: --area X --priority Y --pattern-key K
 $AG review                          # pending stats + promotion candidates
 $AG resolve <ID> ["note"]           # mark entry resolved (+ note)
+$AG groom [--dry-run]               # data hygiene: archive expired data
+                                    #   (auto-runs after bootstrap, 1/day)
 $AG audit                           # audit trail of shared writes
 $AG prune 30                        # list idle agents
 ```
@@ -239,6 +244,19 @@ New skill / MCP / plugin / tool / persistent data you install → **MUST** go un
 条目状态改 `promoted` / `promoted_to_skill`。
 
 **红线**：不记 secrets/token/原始报文；条目只增不改，仅 `Status`/`Resolution` 可由任何 agent 更新。
+
+## Capability 9 — Data hygiene (`ag groom`, protocol 3.2+)
+
+协会用得越久，数据越容易劣化：current-focus 只增不减、daily log 无限堆积、
+audit 越滚越大、resolved 台账条目永远躺在 live 文件里。groom 是自动防线：
+
+- **自动触发**：`ag bootstrap` 尾部挂钩（速率限制默认 24h 一次），skill 正常
+  触发即自动维护，无需用户点名。
+- **保真原则**：只搬不删 —— 过期数据进 `log/archive/`、
+  `handoff/shared-state/archive/`、`learnings/archive/` 或可恢复的 `.trash/`；
+  手写的、无时间戳的 focus 块永远不动；未读收件箱永远只报告不搬。
+- **策略可调**：所有阈值在 `~/.agent-guild/RETENTION.md`（用户文件，升级不覆盖）。
+- **可审计**：每次 groom 写 `log/audit.jsonl` + `.groom.json` 状态。
 
 ## Failure modes
 

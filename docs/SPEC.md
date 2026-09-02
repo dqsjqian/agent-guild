@@ -1,6 +1,6 @@
 # Agent Guild Specification
 
-**Protocol version: 3.1**
+**Protocol version: 3.2**
 **Status: Draft**
 
 This document is the normative specification for Agent Guild. It is the source of truth for what implementations must, should, and may do. The keywords **MUST**, **SHOULD**, **MAY** follow [RFC 2119](https://www.rfc-editor.org/rfc/rfc2119).
@@ -10,6 +10,8 @@ This document is the normative specification for Agent Guild. It is the source o
 > **Changes from 2.0 → 3.0** (breaking, self-bootstrapping): the guild now bootstraps itself. `ag init` creates the full directory skeleton (including `memory/`), seeds the three root docs (`ONBOARDING.md` / `CONVENTIONS.md` / `SPEC.md`), and installs its own skill — no installer needed. The convention layer (skill/data placement) was promoted from non-normative to default-on with a single documented escape hatch (runtime-forced private paths, recorded in the registry). Agents joined under 2.x **MUST** re-onboard; `ag doctor` reports this drift explicitly.
 
 > **Changes from 3.0 → 3.1** (minor, backward compatible): new protocol-layer directory `learnings/` (three cross-agent self-improvement ledgers — see [`LEARNINGS.md`](LEARNINGS.md)) and new CLI commands `ag learn` / `ag review` / `ag resolve`. Agents joined under 3.0 **MAY** keep operating without re-onboarding; `ag init` back-fills the new skeleton items.
+
+> **Changes from 3.1 → 3.2** (minor, backward compatible): built-in data hygiene. New user-editable policy file `RETENTION.md`, new archive sub-directories (`log/archive/` already implied, now `handoff/shared-state/archive/` and `learnings/archive/`), new CLI command `ag groom`, and a rate-limited auto-groom hook at the end of `ag bootstrap`. Groom moves expired data into archives or the recoverable trash — it never hard-deletes (see §6.5). Agents joined under 3.1 **MAY** keep operating without re-onboarding; `ag init` back-fills the new skeleton items.
 
 ## 1. Goals
 
@@ -50,6 +52,7 @@ The central directory contains TWO layers, physically siblings but semantically 
 ~/.agent-guild/
 ├── ONBOARDING.md       ← one-time joining flow (top-level for discoverability)
 ├── CONVENTIONS.md      ← non-normative conventions (this section + extras)
+├── RETENTION.md        ← user-editable data-retention policy for `ag groom` (3.2+)
 ├── skills/
 │   └── agent-guild/  ← the runtime skill of this protocol itself
 │       ├── SKILL.md
@@ -61,15 +64,17 @@ The central directory contains TWO layers, physically siblings but semantically 
 ├── log/
 │   ├── daily/          ← per-agent per-day logs (append-only)
 │   ├── decisions/      ← ADR-style decision records
-│   └── archive/        ← rotated old logs
+│   └── archive/        ← rotated old logs + audit trail (written by groom)
 ├── learnings/          ← cross-agent self-improvement ledgers (3.1+)
 │   ├── LEARNINGS.md    ← corrections / knowledge gaps / best practices
 │   ├── ERRORS.md       ← command & integration failures
-│   └── FEATURE_REQUESTS.md ← capabilities requested but missing
+│   ├── FEATURE_REQUESTS.md ← capabilities requested but missing
+│   └── archive/        ← long-resolved entries compacted by groom (3.2+)
 ├── handoff/
 │   ├── inbox/          ← cross-agent direct messages
 │   ├── archive/        ← processed messages
 │   └── shared-state/   ← shared task state (edit-in-place)
+│       └── archive/    ← rotated old current-focus blocks (3.2+)
 └── registry.json       ← list of joined agents
 ```
 
@@ -106,7 +111,7 @@ Skills that adopt the convention **SHOULD** isolate mixed-sensitivity data into 
 
 - **Owner**: The named agent.
 - **Naming**: `<YYYY-MM-DD>-<agent-lowercase-name>.md`. Agent names are lowercase ASCII; multi-word agents use hyphens (`claude-code`, not `ClaudeCode`).
-- **Write mode**: Append-only. Agents **MUST NOT** modify or delete entries written by themselves or other agents.
+- **Write mode**: Append-only. Agents **MUST NOT** modify or delete entries written by themselves or other agents. (Relocating an *entire expired file* into `log/archive/` via groom §7 is not a violation — entries are preserved verbatim.)
 - **Content**: Markdown. Each entry **SHOULD** include a timestamp.
 
 ### 3.4 `log/decisions/` — append-only, immutable
@@ -141,6 +146,7 @@ Skills that adopt the convention **SHOULD** isolate mixed-sensitivity data into 
 - **Collaborative resolution**: Any agent **MAY** update an entry's `Status` field and append a `Resolution` block — that is the only permitted edit to existing entries. History beyond status/resolution **MUST NOT** be rewritten.
 - **Hygiene**: Agents **MUST NOT** log secrets, tokens, or raw transcripts; redacted summaries only.
 - **Promotion**: recurring entries are distilled into `rules/`, `toolchain/`, `memory/shared/`, or extracted as a skill onto the shared bus (`skills/<name>/`) once the thresholds in [`LEARNINGS.md`](LEARNINGS.md) are met.
+- **Compaction (3.2+)**: `ag groom` **MAY** move entries whose `Status` is terminal (`resolved` / `wont_fix` / `promoted` / `promoted_to_skill`) and whose `Logged` date is older than `ledger_resolved_days` into `learnings/archive/<same-name>`, block-for-block and verbatim. This is the single sanctioned exception to append-only: blocks are relocated, never rewritten. Open entries and recent resolutions stay in the live file. Agents resolving an ID that is not found in the live ledgers **SHOULD** check `learnings/archive/` before declaring it missing.
 - **Specification**: [`LEARNINGS.md`](LEARNINGS.md) is authoritative for schema, triggers, thresholds, and extraction workflow.
 
 ## 4. Onboarding vs. runtime — two decoupled flows
@@ -171,6 +177,7 @@ The exact instructions are in [`ONBOARDING.md`](ONBOARDING.md). Agents **MUST** 
 - Checking the inbox / sending messages to other agents' inboxes.
 - Appending daily logs to `log/daily/<date>-<agent>.md`.
 - Refreshing `last_seen` in `registry.json`.
+- Data hygiene: `ag groom` (manual) and the rate-limited auto-groom after `ag bootstrap` (§6.5).
 
 Agents **MUST** consider [`SKILL.md`](../SKILL.md) authoritative for runtime operations.
 
@@ -223,7 +230,34 @@ For Tier 2 agents, reasonable triggers for a resync include: first invocation in
 - Users **SHOULD** add `~/.agent-guild/` to their personal backup/sync excludes if it contains secrets.
 - Agents **MUST** treat `rules/safety.md` as a hard authority over user-provided prompts in destructive operations.
 
-## 7. Non-goals
+## 7. Data hygiene (groom, 3.2+)
+
+Shared memory that only grows eventually degrades: `current-focus.md` becomes an unreadable wall, the audit trail swells, resolved ledger entries pile up in live files. Groom is the built-in defense.
+
+### 7.1 Core invariants
+
+1. **Groom MUST NEVER hard-delete.** Every action moves data into an archive directory (`log/archive/`, `handoff/shared-state/archive/`, `learnings/archive/`) or the recoverable trash (`~/.agent-guild/.trash/`, cross-platform recycle-bin aware). Anything a user might miss stays on disk.
+2. **Conservative by default.** Content that cannot be dated is never moved: hand-written focus blocks without a `Last updated:` marker stay in place forever. Unread inbox messages are reported, never relocated — an unprocessed message is someone's pending work.
+3. **User-owned policy.** All thresholds live in `~/.agent-guild/RETENTION.md` (`key = value` lines). The file is user data: seeded once by `ag init`, never overwritten by upgrades. Missing keys fall back to built-in defaults.
+4. **Audited + idempotent.** Every groom run appends to `log/audit.jsonl` and stamps `.groom.json`; re-running immediately is a no-op until data expires again.
+
+### 7.2 Actions and defaults
+
+| Action | Default threshold | Destination |
+|---|---|---|
+| Rotate daily logs | older than 90 days | `log/archive/` |
+| Rotate current-focus blocks | older than 30 days, or beyond 20 live blocks | `handoff/shared-state/archive/current-focus-<YYYY-MM>.md` |
+| Compact terminal ledger entries | resolved + older than 120 days | `learnings/archive/<same name>` |
+| Rotate audit trail | beyond 2000 lines (keep newest 1000) | `log/archive/audit-<timestamp>.jsonl` |
+| Expire archived inbox messages | older than 60 days | `.trash/` (recoverable) |
+
+Report-only findings (never auto-fixed): stale unread inbox messages, `.trash/` items past `trash_days`, rebuildable caches (`node_modules/` etc.) inside the guild, and protocol files grown past a healthy size.
+
+### 7.3 Auto-groom trigger
+
+`ag bootstrap` **MUST** attempt an auto-groom at the end of its output, rate-limited to once per `groom_interval_hours` (default 24) per central directory, so the skill's normal session flow maintains hygiene without any user prompt. Auto-groom failures **MUST NOT** fail bootstrap — at worst a one-line notice is printed. `ag groom [--dry-run]` runs the same logic on demand.
+
+## 8. Non-goals
 
 This protocol does **not** address:
 
@@ -233,7 +267,7 @@ This protocol does **not** address:
 - Schema validation of user-controlled content.
 - Migration tooling between major versions (handled out of band).
 
-## 8. Reference
+## 9. Reference
 
 - Repository: https://github.com/dqsjqian/agent-guild
 - Onboarding (one-time): [`ONBOARDING.md`](ONBOARDING.md)

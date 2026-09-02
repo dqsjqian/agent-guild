@@ -6,7 +6,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Status](https://img.shields.io/badge/status-MVP-blue)]()
-[![Protocol](https://img.shields.io/badge/protocol-v2.0-green)]()
+[![Protocol](https://img.shields.io/badge/protocol-v3.2-green)]()
 
 ---
 
@@ -150,7 +150,7 @@ Then talk to your agent.
 
 **Phase 1 (done): Protocol + reference content.** Directory skeleton, `SKILL.md`, `manifest.json`, cross-platform installers. The README is the product.
 
-**Phase 2 (done in 3.0): Single-file CLI** (`ag`) — `init / adopt / bootstrap / doctor / status / register / log / focus / send / audit / prune`. Pure Python stdlib, zero dependencies, Windows / macOS / Linux.
+**Phase 2 (done): Single-file CLI** (`ag`) — `init / adopt / bootstrap / doctor / upgrade / learn / review / resolve / groom / status / register / log / focus / send / audit / prune`. Pure Python stdlib, zero dependencies, Windows / macOS / Linux.
 
 **Phase 3 (in progress): Adapters directory.** Community-contributed integration guides for specific agents.
 

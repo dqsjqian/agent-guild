@@ -6,7 +6,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Status](https://img.shields.io/badge/status-MVP-blue)]()
-[![Protocol](https://img.shields.io/badge/protocol-v2.0-green)]()
+[![Protocol](https://img.shields.io/badge/protocol-v3.2-green)]()
 
 ---
 
@@ -24,12 +24,14 @@
 │  ─── 协议层（强制）───
 ├── ONBOARDING.md                ← 新 agent 一次性入会流程
 ├── CONVENTIONS.md               ← 可选的、非规范性约定
+├── RETENTION.md                 ← 数据保留策略（groom 防劣化阈值，用户可改）
 ├── identity/                    ← 你是谁（profile / 作息）
 ├── rules/                       ← 所有 agent 必须遵守的硬规则
 ├── toolchain/                   ← 工具 / 路径 / 配置
 ├── projects/                    ← 你在做什么
 ├── log/daily/                   ← 按 agent 分文件的日志（无写冲突）
 ├── handoff/                     ← 跨 agent 收件箱 + 共享状态
+├── learnings/                   ← 跨 agent 学习台账（纠正/错误/特性请求）
 ├── skills/agent-guild/    ← 从仓库根安装的 runtime skill（SKILL.md + manifest + scripts）
 ├── registry.json                ← 哪些 agent 加入了
 │
@@ -93,11 +95,13 @@
 
 ---
 
-## 单一真相源 + 自动协议升级
+## 单一真相源 + 自动协议升级 + 自动防劣化
 
 每个加入 agent 的 `~/.<agent>/skills/agent-guild/` 是一条**软链**指回中央 `~/.agent-guild/skills/agent-guild/`。当本项目发布协议升级，你只更新中央目录，**用户机器上每个 agent 下次会话启动就看到新版本**。零推送、零版本检查、零 hash 比对。文件系统语义就这么干净利落。
 
 用户自己的内容（`identity/` `rules/` `toolchain/` 等）**从不会被上游覆盖** —— 它们存在于软链外的同级目录，跟协议骨架物理隔离。
+
+共享记忆只增不减迟早劣化：current-focus 变成一堵墙、日志无限堆积、审计滚成巨石。协议 3.2 内置 **groom 数据卫生**：skill 正常触发（bootstrap）后自动检测并整理——过期日志/焦点块/已解决的台账条目归档、审计轮转、过期消息进废纸篓。**永不硬删**（一切进 archive 或可恢复的 `.trash/`）、**策略可调**（`RETENTION.md`）、未读消息和手写内容永远只报告不动。也可手动 `ag groom --dry-run` 预览。
 
 ---
 
@@ -163,7 +167,7 @@ curl -fsSL https://raw.githubusercontent.com/dqsjqian/agent-guild/main/scripts/i
 
 **Phase 1（已完成）：协议 + 参考内容。** 目录骨架、`SKILL.md`、`manifest.json`、跨平台安装脚本。README 才是产品。
 
-**Phase 2（3.0 已完成）：单文件 Python CLI**（`ag` 命令），子命令 `init / adopt / bootstrap / doctor / status / register / log / focus / send / audit / prune`。stdlib only，零第三方依赖，Windows / macOS / Linux 通用。
+**Phase 2（已完成）：单文件 Python CLI**（`ag` 命令），子命令 `init / adopt / bootstrap / doctor / upgrade / learn / review / resolve / groom / status / register / log / focus / send / audit / prune`。stdlib only，零第三方依赖，Windows / macOS / Linux 通用。
 
 **Phase 3（进行中）：Adapters 目录。** 社区贡献各 agent 的接入指南。
 

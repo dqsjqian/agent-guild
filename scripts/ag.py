@@ -29,6 +29,8 @@ Commands:
                           opts: --area A --priority P --category C --pattern-key K
   review                  Ledger stats: pending items + promotion candidates
   resolve <ID> [note ...] Mark a ledger entry resolved (+ resolution note)
+  groom [--dry-run]       Data hygiene: archive expired logs/focus/ledgers,
+                          rotate audit trail, report degradation (never deletes)
   audit [n]               Show last n audit lines (default 20)
   prune [days]            List agents idle > N days (default 30) — never deletes
 
@@ -67,7 +69,7 @@ FOCUS = CENTRAL / "handoff" / "shared-state" / "current-focus.md"
 VERSION = CENTRAL / "VERSION"
 LEARNINGS = CENTRAL / "learnings"
 
-PROTOCOL_VERSION = "3.1"
+PROTOCOL_VERSION = "3.2"
 
 # Learning ledger: kind -> (file, ID prefix). Protocol 3.1+.
 LEDGERS = {
@@ -89,6 +91,26 @@ VERSION_SOURCES = [
     ("clawhub", "https://clawhub.ai/api/v1/skills/agent-guild/versions"),
 ]
 
+# ------------------------------------------------------------------ groom ---
+
+# Data-hygiene defaults (protocol 3.2+). User-editable in RETENTION.md;
+# re-read on every run. Core invariant: groom NEVER hard-deletes — expired
+# data moves to archive dirs or the recoverable trash.
+RETENTION = CENTRAL / "RETENTION.md"
+GROOM_STATE = CENTRAL / ".groom.json"
+
+RETENTION_DEFAULTS = {
+    "daily_log_days": 90,
+    "focus_days": 30,
+    "focus_blocks": 20,
+    "inbox_archive_days": 60,
+    "audit_max_lines": 2000,
+    "audit_keep_lines": 1000,
+    "ledger_resolved_days": 120,
+    "trash_days": 30,
+    "groom_interval_hours": 24,
+}
+
 # Download source for upgrades — our own GitHub release zip (most stable).
 GITHUB_RELEASE_ZIP = (
     "https://github.com/dqsjqian/agent-guild/releases/download/"
@@ -100,7 +122,8 @@ GITHUB_RELEASE_ZIP = (
 SKELETON = [
     "identity", "rules", "toolchain", "projects",
     "handoff/inbox", "handoff/archive", "handoff/shared-state",
-    "log/daily", "log/decisions", "learnings",
+    "handoff/shared-state/archive",
+    "log/daily", "log/decisions", "log/archive", "learnings", "learnings/archive",
     "skills", "skills_data", "mcp", "plugins", "tools", "memory", "connectors",
 ]
 
@@ -135,6 +158,24 @@ PLACEHOLDERS = {
         "# Feature Requests\n\n"
         "Cross-agent ledger: capabilities the user wanted but nothing provides.\n\n"
         "---\n"
+    ),
+    "RETENTION.md": (
+        "# Data Retention Policy\n\n"
+        "> `ag groom` (auto-run after bootstrap, at most once per interval)\n"
+        "> reads this file. Edit freely — values apply on the next run.\n"
+        "> Nothing is ever hard-deleted: expired data moves to archive dirs\n"
+        "> or the recoverable trash (`~/.agent-guild/.trash/`).\n\n"
+        "```\n"
+        "daily_log_days = 90        # log/daily/ files older -> log/archive/\n"
+        "focus_days = 30            # current-focus blocks older -> shared-state/archive/\n"
+        "focus_blocks = 20          # ...and beyond this many live blocks\n"
+        "inbox_archive_days = 60    # handoff/archive/ messages older -> .trash/\n"
+        "audit_max_lines = 2000     # audit.jsonl beyond this rotates\n"
+        "audit_keep_lines = 1000    # newest lines kept after rotation\n"
+        "ledger_resolved_days = 120 # resolved ledger entries older -> learnings/archive/\n"
+        "trash_days = 30            # .trash/ items older -> reported for manual emptying\n"
+        "groom_interval_hours = 24  # auto-groom cooldown\n"
+        "```\n"
     ),
 }
 
@@ -964,6 +1005,10 @@ def cmd_bootstrap(args: list) -> int:
         print("  fix what you touch (ag resolve), promote what recurs (ag review).")
 
     print(f"\n{shown}/{len(BOOTSTRAP_FILES)} context files loaded.")
+
+    # Data hygiene (protocol 3.2+): rate-limited auto-groom so the guild never
+    # slowly rots. Prints only when something was found; never fails.
+    maybe_auto_groom(agent)
     return 0
 
 
@@ -1428,6 +1473,336 @@ def cmd_review(args: list) -> int:
     return 0
 
 
+# ------------------------------------------------------------------ groom ---
+
+def _parse_iso(s: str):
+    """Lenient ISO-8601 parser -> aware datetime (or None)."""
+    try:
+        t = datetime.fromisoformat(str(s).strip().replace("Z", "+00:00"))
+        if t.tzinfo is None:
+            t = t.replace(tzinfo=timezone.utc)
+        return t
+    except (ValueError, TypeError):
+        return None
+
+
+def load_retention() -> dict:
+    """RETENTION.md `key = value` lines override the defaults. Missing keys,
+    a missing file, or unparseable values fall back silently."""
+    out = dict(RETENTION_DEFAULTS)
+    if not RETENTION.is_file():
+        return out
+    for line in RETENTION.read_text(encoding="utf-8", errors="ignore").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, _, v = line.partition("=")
+        k, v = k.strip(), v.strip().split("#", 1)[0].strip()
+        if k in out:
+            try:
+                out[k] = int(v)
+            except ValueError:
+                pass
+    return out
+
+
+# current-focus blocks are opened by an `ag focus`-style marker line.
+# The timestamp is captured leniently up to " by <agent>": agents have been
+# observed writing "2026-08-03 11:47" (space, no tz) instead of strict ISO.
+_FOCUS_TS_RE = re.compile(r"^> Last updated: (.+?) by \S+\s*$", re.M)
+_FOCUS_SEP = "\n---\n"
+
+
+def _split_focus(text: str):
+    """Split current-focus.md into (header, blocks). Each block carries a
+    'Last updated:' marker (ag focus style) plus any hand-written fragment
+    that trails it before the next marker. Fragments without their own
+    marker are never rotated — they always stay in the live file."""
+    matches = list(_FOCUS_TS_RE.finditer(text))
+    if not matches:
+        return text, []
+    header = text[:matches[0].start()]
+    blocks = []
+    for i, m in enumerate(matches):
+        seg_end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        seg = text[m.start():seg_end]
+        sep = seg.find(_FOCUS_SEP)
+        if sep != -1:
+            end = sep + len(_FOCUS_SEP)
+            blocks.append({"ts": _parse_iso(m.group(1)), "text": seg[:end], "tail": seg[end:]})
+        else:
+            blocks.append({"ts": _parse_iso(m.group(1)), "text": seg, "tail": ""})
+    return header, blocks
+
+
+def _atomic_write_text(path: Path, body: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".ag-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(body)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def _groom(cfg: dict, dry_run: bool = False):
+    """Detect + fix data degradation. Returns (actions, notes).
+    Actions mutate (archive / trash — never delete); notes are report-only."""
+    now = datetime.now(timezone.utc)
+    acts, notes = [], []
+
+    # -- 1. rotate old daily logs -> log/archive/ --------------------------
+    log_archive = CENTRAL / "log" / "archive"
+    rotated = []
+    if DAILY.is_dir():
+        for f in sorted(DAILY.iterdir()):
+            m = re.match(r"^(\d{4}-\d{2}-\d{2})-", f.name)
+            if not f.is_file() or not m:
+                continue
+            d = _parse_iso(m.group(1))
+            if d and (now - d).days > cfg["daily_log_days"]:
+                rotated.append(f)
+    if rotated:
+        span = f"({rotated[0].name[:10]} .. {rotated[-1].name[:10]})"
+        if dry_run:
+            acts.append(f"would rotate {len(rotated)} daily log(s) -> log/archive/ {span}")
+        else:
+            log_archive.mkdir(parents=True, exist_ok=True)
+            for f in rotated:
+                dest = log_archive / f.name
+                if dest.exists():
+                    dest = log_archive / f"{f.stem}-{now:%Y%m%d%H%M%S}{f.suffix}"
+                shutil.move(str(f), str(dest))
+            acts.append(f"rotated {len(rotated)} daily log(s) -> log/archive/ {span}")
+
+    # -- 2. rotate stale current-focus blocks -> shared-state/archive/ -----
+    if FOCUS.is_file():
+        text = FOCUS.read_text(encoding="utf-8")
+        header, blocks = _split_focus(text)
+        cutoff = now.timestamp() - cfg["focus_days"] * 86400
+        keep_idx, drop_idx = [], []
+        for i, b in enumerate(blocks):
+            if b["ts"] and b["ts"].timestamp() < cutoff:
+                drop_idx.append(i)
+            else:
+                keep_idx.append(i)
+        # count cap: beyond focus_blocks live blocks, rotate the OLDEST
+        # timestamped ones (tail of the list); timestamp-less blocks never move
+        if len(keep_idx) > cfg["focus_blocks"]:
+            excess = len(keep_idx) - cfg["focus_blocks"]
+            moved = []
+            for i in reversed(keep_idx):
+                if excess <= 0:
+                    break
+                if blocks[i]["ts"]:
+                    moved.append(i)
+                    excess -= 1
+            if moved:
+                drop_idx += moved
+                drop_idx.sort()
+                moved_set = set(moved)
+                keep_idx = [i for i in keep_idx if i not in moved_set]
+        if drop_idx:
+            bucket = (CENTRAL / "handoff" / "shared-state" / "archive"
+                      / f"current-focus-{now:%Y-%m}.md")
+            drop_set = set(drop_idx)
+            arch_body = "".join(blocks[i]["text"] for i in drop_idx)
+            kept_text = header
+            for i, b in enumerate(blocks):
+                if i in drop_set:
+                    kept_text += b.get("tail", "")  # hand-written tail stays live
+                else:
+                    kept_text += b["text"] + b.get("tail", "")
+            span = f"({len(keep_idx)} kept)"
+            if dry_run:
+                acts.append(f"would archive {len(drop_idx)} focus block(s) -> "
+                            f"shared-state/archive/ {span}")
+            else:
+                atomic_append(bucket, arch_body)
+                _atomic_write_text(FOCUS, kept_text)
+                acts.append(f"archived {len(drop_idx)} focus block(s) -> "
+                            f"handoff/shared-state/archive/current-focus-{now:%Y-%m}.md {span}")
+
+    # -- 3. compact resolved ledger entries -> learnings/archive/ ----------
+    for path in _ledger_files():
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8")
+        entries = _parse_entries(text)
+        if not entries:
+            continue
+        keep_e, drop_e = [], []
+        for e in entries:
+            st = _field(e, "Status")
+            logged = _parse_iso(_field(e, "Logged"))
+            if (st in ("resolved", "wont_fix", "promoted", "promoted_to_skill")
+                    and logged and (now - logged).days > cfg["ledger_resolved_days"]):
+                drop_e.append(e)
+            else:
+                keep_e.append(e)
+        if drop_e:
+            if dry_run:
+                acts.append(f"would compact {len(drop_e)} resolved entrie(s) "
+                            f"from {path.name} -> learnings/archive/")
+            else:
+                arcdir = LEARNINGS / "archive"
+                arcdir.mkdir(parents=True, exist_ok=True)
+                atomic_append(arcdir / path.name,
+                              "\n".join(e["block"].rstrip("\n") for e in drop_e) + "\n")
+                first = _ENTRY_RE.search(text)
+                prefix = text[:first.start()] if first else text
+                _atomic_write_text(path, prefix + "".join(e["block"] for e in keep_e))
+                acts.append(f"compacted {len(drop_e)} resolved entrie(s) from "
+                            f"{path.name} -> learnings/archive/{path.name} "
+                            f"({len(keep_e)} live)")
+
+    # -- 4. rotate the audit trail ------------------------------------------
+    if AUDIT.exists():
+        lines = [l for l in AUDIT.read_text(encoding="utf-8").splitlines() if l.strip()]
+        if len(lines) > cfg["audit_max_lines"]:
+            keep_n = min(cfg["audit_keep_lines"], len(lines) - 1)
+            head, tail = lines[:-keep_n] if keep_n else lines, lines[-keep_n:] if keep_n else []
+            if head:
+                if dry_run:
+                    acts.append(f"would rotate audit.jsonl: {len(head)} old line(s) -> log/archive/")
+                else:
+                    log_archive.mkdir(parents=True, exist_ok=True)
+                    (log_archive / f"audit-{now:%Y%m%d-%H%M%S}.jsonl").write_text(
+                        "\n".join(head) + "\n", encoding="utf-8")
+                    _atomic_write_text(AUDIT, "\n".join(tail) + "\n")
+                    acts.append(f"rotated audit.jsonl: {len(head)} old line(s) -> "
+                                f"log/archive/, {len(tail)} kept")
+
+    # -- 5. expire old archived handoff messages -> recoverable trash -------
+    h_archive = CENTRAL / "handoff" / "archive"
+    expired = []
+    if h_archive.is_dir():
+        for f in sorted(h_archive.iterdir()):
+            try:
+                if f.is_file() and (now.timestamp() - f.stat().st_mtime) > cfg["inbox_archive_days"] * 86400:
+                    expired.append(f)
+            except OSError:
+                continue
+    if expired:
+        if dry_run:
+            acts.append(f"would trash {len(expired)} archived message(s) older than "
+                        f"{cfg['inbox_archive_days']}d (recoverable)")
+        else:
+            for f in expired:
+                to_trash(f)
+            acts.append(f"trashed {len(expired)} archived message(s) older than "
+                        f"{cfg['inbox_archive_days']}d (recoverable in .trash/)")
+
+    # -- 6. report-only findings (never auto-fixed) --------------------------
+    if INBOX.is_dir():
+        try:
+            stale_unread = [f for f in INBOX.iterdir() if f.is_file()
+                            and (now.timestamp() - f.stat().st_mtime) > cfg["inbox_archive_days"] * 86400]
+        except OSError:
+            stale_unread = []
+        if stale_unread:
+            notes.append(f"{len(stale_unread)} unread inbox message(s) older than "
+                         f"{cfg['inbox_archive_days']}d — never auto-moved (unprocessed)")
+    trash_dir = CENTRAL / ".trash"
+    if trash_dir.is_dir():
+        try:
+            old_trash = [d for d in trash_dir.iterdir()
+                         if (now.timestamp() - d.stat().st_mtime) > cfg["trash_days"] * 86400]
+        except OSError:
+            old_trash = []
+        if old_trash:
+            notes.append(f".trash/ holds {len(old_trash)} item(s) older than "
+                         f"{cfg['trash_days']}d — safe to empty by hand")
+    cache_hits = []
+    for root_name in ("skills", "skills_data", "mcp", "plugins", "tools"):
+        base = CENTRAL / root_name
+        if not base.is_dir():
+            continue
+        for cur, dirs, _files in os.walk(base):
+            for d in list(dirs):
+                if d in ("node_modules", ".venv", "venv", "__pycache__", ".cache"):
+                    cache_hits.append(Path(cur) / d)
+                    dirs.remove(d)
+    if cache_hits:
+        notes.append(f"{len(cache_hits)} rebuildable cache dir(s) inside the guild "
+                     f"(node_modules/.venv/__pycache__) — bloat backups; clean or rebuild outside")
+    return acts, notes
+
+
+def _record_groom(acts: list, notes: list) -> None:
+    atomic_write_json(GROOM_STATE, {
+        "last_run": now_iso(),
+        "last_actions": acts,
+        "last_notes": notes,
+    })
+
+
+def _groom_due(cfg: dict) -> bool:
+    if not GROOM_STATE.is_file():
+        return True
+    try:
+        last = json.loads(GROOM_STATE.read_text(encoding="utf-8")).get("last_run", "")
+    except (json.JSONDecodeError, OSError):
+        return True
+    t = _parse_iso(last)
+    if not t:
+        return True
+    return (_now_epoch() - t.timestamp()) >= cfg["groom_interval_hours"] * 3600
+
+
+def _now_epoch() -> float:
+    return datetime.now(timezone.utc).timestamp()
+
+
+def maybe_auto_groom(agent: str) -> None:
+    """Rate-limited auto-groom after bootstrap — keeps the guild from slowly
+    rotating. At most once per groom_interval_hours; NEVER fails bootstrap."""
+    try:
+        cfg = load_retention()
+        if not _groom_due(cfg):
+            return
+        acts, notes = _groom(cfg, dry_run=False)
+        _record_groom(acts, notes)
+        audit("groom", {"agent": agent, "auto": True,
+                        "actions": len(acts), "notes": len(notes)})
+        if acts or notes:
+            print(f"\n== AUTO-GROOM (data hygiene — policy: RETENTION.md) ==")
+            for a in acts:
+                print(f"  ✓ {a}")
+            for n in notes:
+                print(f"  ! {n}")
+    except Exception as e:  # hygiene must never break the session contract
+        print(f"  (auto-groom skipped: {e})")
+
+
+def cmd_groom(args: list) -> int:
+    """Data hygiene: archive expired logs/focus/ledgers, rotate the audit
+    trail, trash stale archived messages, report degradation. Default applies;
+    --dry-run only reports. Never hard-deletes."""
+    if not CENTRAL.exists():
+        print(f"{CENTRAL} missing — run `ag init` first", file=sys.stderr)
+        return 1
+    dry = "--dry-run" in args
+    agent = os.environ.get("AG_AGENT") or "unknown"
+    acts, notes = _groom(load_retention(), dry)
+    print(f"== groom {'(DRY-RUN) ' if dry else ''}— {CENTRAL} ==")
+    for a in acts:
+        print(f"  {'→' if dry else '✓'} {a}")
+    if not acts:
+        print("  ok — nothing past retention (policy: RETENTION.md)")
+    for n in notes:
+        print(f"  ! {n}")
+    if not dry:
+        _record_groom(acts, notes)
+        audit("groom", {"agent": agent, "actions": len(acts), "notes": len(notes)})
+    return 0
+
+
 def cmd_audit(args: list) -> int:
     n = int(args[0]) if args and args[0].isdigit() else 20
     if not AUDIT.exists():
@@ -1492,6 +1867,7 @@ def main() -> int:
         "learn": cmd_learn,
         "review": cmd_review,
         "resolve": cmd_resolve,
+        "groom": cmd_groom,
         "audit": cmd_audit,
         "prune": cmd_prune,
     }
