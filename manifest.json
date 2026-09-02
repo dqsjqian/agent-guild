@@ -2,7 +2,7 @@
   "$schema": "https://github.com/dqsjqian/agent-guild/raw/main/spec/manifest.schema.json",
   "name": "agent-guild",
   "protocol_version": "3.2",
-  "skill_version": "3.6.0",
+  "skill_version": "3.6.1",
   "spec_url": "https://github.com/dqsjqian/agent-guild/blob/main/docs/SPEC.md",
   "onboarding_url": "https://github.com/dqsjqian/agent-guild/blob/main/docs/ONBOARDING.md",
   "skill_url": "https://github.com/dqsjqian/agent-guild/blob/main/SKILL.md",

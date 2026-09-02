@@ -1090,7 +1090,8 @@ def cmd_doctor(args: list) -> int:
     drift = 0
     for name, entry in reg.get("agents", {}).items():
         home = entry.get("home", "")
-        if home and not Path(home).expanduser().exists():
+        # "platform-managed" is a sentinel (no real home dir), not a path
+        if home and home != "platform-managed" and not Path(home).expanduser().exists():
             print(f"  ✗ [{name}] home does not exist: {home}")
             drift += 1
         sr = entry.get("skills_root")
