@@ -185,7 +185,7 @@ curl -fsSL https://raw.githubusercontent.com/dqsjqian/agent-guild/main/scripts/i
 
 ## License
 
-MIT。详见 [LICENSE](LICENSE)。
+MIT。详见 [LICENSE](../LICENSE)。
 
 ## 作者
 

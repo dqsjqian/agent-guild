@@ -167,7 +167,7 @@ This project is a **convention**, not software. Convention beats configuration. 
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT. See [LICENSE](../LICENSE).
 
 ## Author
 

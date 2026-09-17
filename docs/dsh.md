@@ -62,5 +62,5 @@ python3 ~/.agent-guild/skills/agent-guild/scripts/ag.py upgrade --apply
 
 ---
 
-> 更完整的说明见 [README](README.md) / [ONBOARDING](docs/ONBOARDING.md) /
-> [SPEC](docs/SPEC.md)。
+> 更完整的说明见 [README](README.md) / [ONBOARDING](ONBOARDING.md) /
+> [SPEC](SPEC.md)。
