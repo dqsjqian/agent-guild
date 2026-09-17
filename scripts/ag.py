@@ -472,11 +472,16 @@ def cmd_link_root(args: list) -> int:
         return 1
     for child in children:
         if child.is_symlink():
+            # A link is redundant if the guild already owns that name (either
+            # the link points straight into skills/, or skills/<name> exists
+            # and only resolves further out, e.g. a source-repo symlink).
             try:
                 inside = child.resolve().parent == guild_resolved
             except OSError:
                 inside = False
-            (trash_items if inside else move_items).append(child)
+            dest = guild / child.name
+            redundant = inside or dest.exists() or dest.is_symlink()
+            (trash_items if redundant else move_items).append(child)
         elif child.name == ".DS_Store":
             trash_items.append(child)
         elif (child.is_dir() and (child / "SKILL.md").is_file()
@@ -491,7 +496,7 @@ def cmd_link_root(args: list) -> int:
     print(f"{'kind':<28} item")
     print("-" * 78)
     for c in trash_items:
-        print(f"{'trash (dir link covers)':<28} {c.name}")
+        print(f"{'trash (guild already has it)':<28} {c.name}")
     for c in move_items:
         print(f"{'move into guild':<28} {c.name} -> {os.readlink(c)}")
     for c in adopt_items:
