@@ -17,13 +17,14 @@ description: |
   能力：读/写共享身份、规则、焦点；收件箱交接；每日日志；跨 agent 学习台账
   （错误/纠正/特性请求 → 复发追踪 → 晋升规则或萃取共享 skill）；数据卫生
   （bootstrap 后自动 groom：过期日志/焦点/台账归档、审计轮转，防数据劣化）；
-  `ag init/adopt/bootstrap/doctor/groom/upgrade/learn/review/resolve`（upgrade
-  自动从 skillhub/github/clawhub 查最新版并更新）。
+  `ag init/adopt/link-root/bootstrap/doctor/groom/upgrade/learn/review/resolve`
+  （link-root 把 runtime 整个 skills 目录收敛成指向协会的一条目录级软链；
+  upgrade 自动从 skillhub/github/clawhub 查最新版并更新）。
   未加入？先跑 docs/ONBOARDING.md。
 slug: agent-guild
 displayName: 智能体协会 Agent Guild
 protocol_version: "3.2"
-version: "3.6.1"
+version: "3.7.0"
 license: MIT
 homepage: https://github.com/dqsjqian/agent-guild
 repository: https://github.com/dqsjqian/agent-guild
@@ -45,8 +46,10 @@ agent_created: true
 
 1. Run the onboarding flow: `~/.agent-guild/ONBOARDING.md` (or this skill's
    `docs/ONBOARDING.md`) — discover your runtime's user-extensible skills dir,
-   install this skill (symlink → copy → readonly), run the closed-loop trigger
-   test, register yourself in `registry.json`.
+   consolidate it into the guild with ONE directory link
+   (`ag link-root <me> --apply`; fallbacks: per-skill symlink → copy →
+   readonly), run the closed-loop trigger test, register yourself in
+   `registry.json`.
 2. Then come back here — this file is your everyday capability.
 
 ## Mandatory Session Contract (once per session, MUST)
@@ -100,7 +103,15 @@ python3 <SKILL_DIR>/scripts/ag.py bootstrap <your-agent-name>
 
 ### M3 — Route skills & data into the guild (default-on)
 
-- **装新 skill**：MUST 装到 `~/.agent-guild/skills/<name>/`，再从那里软链回自己 runtime（symlink → copy → readonly 降级，见 ONBOARDING.md Step 3）。
+- **接入形态（首选）**：你的 skills 目录 = 协会 skills 目录。跑
+  `ag link-root <me> --apply` 把整个 user-extensible skills 目录换成指向
+  `~/.agent-guild/skills/` 的**一条目录级软链**（外部源软链收编进协会、
+  旧的 per-skill 软链清理）。此后协会每多一个 skill，你**零操作**立即可见。
+- **降级阶梯**：runtime 不跟随目录级软链、或 skills 目录里混有平台托管条目
+  （`__skillhub` / connector 等）→ per-skill 软链 → copy → readonly（见
+  ONBOARDING.md Step 3）。
+- **装新 skill**：MUST 装到 `~/.agent-guild/skills/<name>/`（目录级软链下
+  装完即全 runtime 可见；per-skill 模式下再从那里链回自己 runtime）。
 - **写持久化数据**：MUST 写 `~/.agent-guild/skills_data/<skill>/`（敏感数据拆 `private/`）。
 - **MCP / 插件 / CLI 工具**：分别进 `mcp/`、`plugins/`、`tools/`。
 - **唯一豁免**：你的 runtime 强制私有路径（如 platform-managed）——在 registry 里记录原因即可，不算违反。
@@ -210,6 +221,8 @@ Once per session, update your entry's `last_seen` (prefer `ag last-seen`, fallba
 ## Capability 6 — Where to persist shared data
 
 New skill / MCP / plugin / tool / persistent data you install → **MUST** go under `~/.agent-guild/{skills,skills_data,mcp,plugins,tools}/<name>/`, not a private path (唯一豁免见 M3). The user backs up the whole `~/.agent-guild/` with one command.
+
+目录级软链（`ag link-root`）接入的 runtime：装进 `skills/` 的新 skill 自动出现在你的技能列表里，不需要任何回链动作。
 
 ## Capability 7 — Cross-agent memory
 

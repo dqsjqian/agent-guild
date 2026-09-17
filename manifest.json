@@ -2,7 +2,7 @@
   "$schema": "https://github.com/dqsjqian/agent-guild/raw/main/spec/manifest.schema.json",
   "name": "agent-guild",
   "protocol_version": "3.2",
-  "skill_version": "3.6.1",
+  "skill_version": "3.7.0",
   "spec_url": "https://github.com/dqsjqian/agent-guild/blob/main/docs/SPEC.md",
   "onboarding_url": "https://github.com/dqsjqian/agent-guild/blob/main/docs/ONBOARDING.md",
   "skill_url": "https://github.com/dqsjqian/agent-guild/blob/main/SKILL.md",
@@ -27,7 +27,7 @@
       "CONVENTIONS.md": "default-on conventions (this file)"
     },
     "convention_layer": {
-      "skills/<name>/": "agent-loadable capabilities (this skill itself + future shared skills)",
+      "skills/<name>/": "agent-loadable capabilities (this skill itself + future shared skills); joined runtimes typically point their whole user-extensible skills dir at skills/ via ONE directory link (`ag link-root`), so every entry here is live for all of them at once",
       "skills_data/<name>/": "per-skill persistent data — default location (escape hatch: runtime-forced private path) for any skill that needs to persist user-facing data, gives users a single backup root",
       "memory/<agent>/": "agent-private memory files adopted from each runtime (MEMORY.md / SOUL.md / USER.md / IDENTITY.md, symlinked back to the agent home)",
       "memory/shared/": "cross-agent facts worth sharing with every joined agent",
@@ -70,7 +70,7 @@
       "ref": "ONBOARDING.md",
       "frequency": "once per agent (or after major protocol-version bump)",
       "trigger": "user says 'join Agent Guild' / 'read ~/.agent-guild/ONBOARDING.md' / equivalent",
-      "summary": "Discover user-extensible skills dir → install (symlink → copy → readonly) → closed-loop trigger test → register in registry.json"
+      "summary": "Discover user-extensible skills dir → consolidate it into the guild with ONE directory link (dir-symlink → per-skill symlink → copy → readonly) → closed-loop trigger test → register in registry.json"
     },
     "runtime": {
       "ref": "SKILL.md",
@@ -106,7 +106,7 @@
       "write_mode": "none"
     },
     "onboard": {
-      "summary": "One-time joining flow. The agent MUST install into its OWN user-extensible / 'custom skills' directory (NOT another agent's directory, NOT a built-in/whitelisted tier where files would land but never trigger). After install, MUST run a closed-loop trigger test in its own runtime; on failure, walk down symlink → copy → readonly autonomously, retesting after each change; only after exhausting all three tiers may the agent deliver an honest 'cannot fully join' report. 'Files on disk' is not success; 'runtime can trigger this skill' is success.",
+      "summary": "One-time joining flow. The agent MUST install into its OWN user-extensible / 'custom skills' directory (NOT another agent's directory, NOT a built-in/whitelisted tier where files would land but never trigger). Preferred install: `ag link-root <agent> --apply` consolidates the whole skills dir into ONE directory link. After install, MUST run a closed-loop trigger test in its own runtime; on failure, walk down dir-symlink → symlink → copy → readonly autonomously, retesting after each change; only after exhausting all tiers may the agent deliver an honest 'cannot fully join' report. 'Files on disk' is not success; 'runtime can trigger this skill' is success.",
       "ref": "ONBOARDING.md"
     },
     "log_daily": {
@@ -142,7 +142,7 @@
       "write_mode": "create_new"
     },
     "register": {
-      "summary": "Update your entry in registry.json (Edit, not Write); include install_tier, install_verified, skills_root, protocol_version (the version you joined under, copied from this manifest at join time)",
+      "summary": "Update your entry in registry.json (Edit, not Write); include install_tier (dir-symlink|symlink|copy|readonly), install_verified, skills_root, protocol_version (the version you joined under, copied from this manifest at join time)",
       "write_mode": "edit_in_place"
     },
     "refresh_last_seen": {
@@ -159,12 +159,17 @@
       "_precondition": "Defined in ONBOARDING.md Step 2: the agent MUST locate its OWN user-extensible skills directory (the path the runtime is allowed to load third-party skills from — sometimes called 'Custom Skills', 'User Skills', or 'Plugins'). Installing into another agent's directory OR into a built-in/whitelisted/signed skills tier is a protocol violation."
     },
     {
-      "_postcondition": "Defined in ONBOARDING.md Step 4: after choosing a tier and installing, the agent MUST run a closed-loop trigger test (list / describe / invoke the skill in its own runtime) and ONLY treat the install as complete when the runtime confirms it can trigger the skill. Tier downgrade ladder symlink → copy → readonly is mandatory if the test fails."
+      "_postcondition": "Defined in ONBOARDING.md Step 4: after choosing a tier and installing, the agent MUST run a closed-loop trigger test (list / describe / invoke the skill in its own runtime) and ONLY treat the install as complete when the runtime confirms it can trigger the skill. Tier downgrade ladder dir-symlink → symlink → copy → readonly is mandatory if the test fails."
+    },
+    {
+      "tier": "dir-symlink",
+      "preferred": true,
+      "description": "Agent replaces its whole user-extensible skills dir with ONE directory link <its-own-user-extensible-skills-dir> -> ~/.agent-guild/skills/ (ag link-root --apply). Every guild skill — current and future — is instantly visible; auto-updates with central; zero per-skill maintenance. Preferred whenever the runtime follows directory symlinks and the skills dir is dedicated to skills."
     },
     {
       "tier": "symlink",
-      "preferred": true,
-      "description": "Agent creates symlink <its-own-user-extensible-skills-dir>/agent-guild -> ~/.agent-guild/skills/agent-guild/. Auto-updates with central."
+      "fallback": true,
+      "description": "Per-skill links: agent creates symlink <its-own-user-extensible-skills-dir>/agent-guild -> ~/.agent-guild/skills/agent-guild/ (and one link per guild skill). Use when the runtime refuses to follow a directory-level link, or the skills dir also hosts host-wired / platform-managed items that must stay in a real directory. Auto-updates with central."
     },
     {
       "tier": "copy",

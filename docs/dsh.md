@@ -9,21 +9,23 @@ dsh 的 skill 机制与 Claude Code 同构（`SKILL.md` + YAML frontmatter），
 
 ## 一、安装：让 dsh 识别 agent-guild
 
-### 方式 1 — 软链（推荐，自动跟随更新）
+### 方式 1 — 目录级软链（推荐，一条链接管全部协会 skills）
 
 ```bash
-mkdir -p ~/.dsh/skills
-ln -sfn ~/.agent-guild/skills/agent-guild ~/.dsh/skills/agent-guild
+# 先把 dsh 现有 skill 收编进协会，再把整个 skills 目录链过去
+python3 ~/.agent-guild/skills/agent-guild/scripts/ag.py adopt dsh --apply
+python3 ~/.agent-guild/skills/agent-guild/scripts/ag.py link-root dsh --apply
+# 效果：~/.dsh/skills -> ~/.agent-guild/skills（协会新增 skill 即刻可见）
 ```
 
 > 如果你还没有 `~/.agent-guild/`，先装中央目录：
 > `curl -fsSL https://raw.githubusercontent.com/dqsjqian/agent-guild/main/scripts/install.sh | bash`
 
-### 方式 2 — 复制（sandbox 不识别软链时）
+### 方式 2 — 逐 skill 软链（sandbox 不跟随目录软链时）
 
 ```bash
 mkdir -p ~/.dsh/skills
-cp -R ~/.agent-guild/skills/agent-guild/. ~/.dsh/skills/agent-guild/
+ln -sfn ~/.agent-guild/skills/agent-guild ~/.dsh/skills/agent-guild
 ```
 
 ### 方式 3 — 项目级（仅当前工作区）
@@ -44,7 +46,8 @@ dsh 应当加载 agent-guild 并读取共享记忆。**文件在磁盘上 ≠ �
 
 ```bash
 python3 ~/.agent-guild/skills/agent-guild/scripts/ag.py init dsh
-python3 ~/.agent-guild/skills/agent-guild/scripts/ag.py register dsh ~/.dsh/ symlink ~/.dsh/skills/
+python3 ~/.agent-guild/skills/agent-guild/scripts/ag.py register dsh ~/.dsh/ dir-symlink ~/.dsh/skills/
+# 若用的是方式 2/2b，tier 换成 symlink / copy
 ```
 
 之后 dsh 就能和其他 agent（WorkBuddy / CodeBuddy / Claude / ...）共享身份、规则、

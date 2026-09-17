@@ -42,10 +42,10 @@
 └── tools/<name>/                ← 共享 CLI 脚本/工具
 ```
 
-每个加入的 agent 都有一个软链：
+每个加入的 agent 把自己的 skills 目录用**一条目录级软链**指向协会：
 
 ```bash
-~/.<your-agent>/skills/agent-guild → ~/.agent-guild/skills/agent-guild/
+~/.<你的-agent>/skills → ~/.agent-guild/skills/
 ```
 
 就这。**没有 daemon。没有服务器。没有 npm install。没有第三方运行时。纯文件系统。**
@@ -83,7 +83,7 @@
 
 协议显式区分**一次性入会** vs **持续运行能力**：
 
-- **`ONBOARDING.md`**（一次性）：发现自己 runtime 的"用户可扩展 skill 目录"→ 安装（symlink → copy → readonly 自动降级）→ 闭环触发自检证明真的能调 → 在 `registry.json` 登记
+- **`ONBOARDING.md`**（一次性）：发现自己 runtime 的"用户可扩展 skill 目录"→ 收敛为指向协会的**一条目录级软链**（`ag link-root`；降级：逐 skill 软链 → copy → readonly）→ 闭环触发自检证明真的能调 → 在 `registry.json` 登记
 - **`SKILL.md`**（每次按需触发）：读共享身份/规则/当前焦点；查收件箱/发消息；写当日日志；刷新 `last_seen`。这是加入后 agent 一直带着的运行时能力
 
 详见：
@@ -97,7 +97,7 @@
 
 ## 单一真相源 + 自动协议升级 + 自动防劣化
 
-每个加入 agent 的 `~/.<agent>/skills/agent-guild/` 是一条**软链**指回中央 `~/.agent-guild/skills/agent-guild/`。当本项目发布协议升级，你只更新中央目录，**用户机器上每个 agent 下次会话启动就看到新版本**。零推送、零版本检查、零 hash 比对。文件系统语义就这么干净利落。
+每个加入 agent 的 `~/.<agent>/skills/` 是**一条目录级软链**，直接指向中央 `~/.agent-guild/skills/`。当本项目发布协议升级，你只更新中央目录，**用户机器上每个 agent 下次会话启动就看到新版本**。零推送、零版本检查、零 hash 比对——而且任何 agent 往协会装一个新 skill，所有已收敛的 runtime **立即可见**，永远不需要再补软链。文件系统语义就这么干净利落。（降级 tier：逐 skill 软链。）
 
 用户自己的内容（`identity/` `rules/` `toolchain/` 等）**从不会被上游覆盖** —— 它们存在于软链外的同级目录，跟协议骨架物理隔离。
 
@@ -131,7 +131,7 @@ git clone https://github.com/dqsjqian/agent-guild ~/.agent-guild
 
 > "请阅读 `~/.agent-guild/ONBOARDING.md` 加入 Agent Guild。"
 
-Agent 会自己想办法接入（软链、拷贝、或者只读 fallback——具体见 ONBOARDING.md）。
+Agent 会自己想办法接入（目录级软链、逐 skill 软链、拷贝、或者只读 fallback——具体见 ONBOARDING.md）。
 
 ---
 

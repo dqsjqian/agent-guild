@@ -35,7 +35,7 @@ The `skills/` directory is **not** just where Agent Guild keeps its own runtime 
 
 ### Important properties
 
-- **Joined agents SHOULD prefer `~/.agent-guild/skills/<name>/` over installing a private copy.** If a user wants the wechat-publisher skill, install it once into the central bus; every agent then symlinks/copies/reads from there using the same Tier-1/2/3 install pattern from `ONBOARDING.md` Step 3.
+- **Joined agents SHOULD prefer `~/.agent-guild/skills/<name>/` over installing a private copy.** If a user wants the wechat-publisher skill, install it once into the central bus. On the `dir-symlink` tier (`ag link-root`, one link for the whole skills dir) every joined runtime then sees it instantly — zero per-skill linking; per-skill tier runtimes link/copy/read from there using the Tier-1b/2/3 install pattern from `ONBOARDING.md` Step 3.
 - **Each skill subdirectory is owned by that skill.** Agent Guild does NOT validate or interpret its contents.
 - **Naming** (MUST): lowercase-hyphenated slug `[a-z0-9-]` (e.g. `qq-mail`, `agent-browser`, `wecom-doc-to-html`). No CJK characters, no spaces, no `-skill` suffix — the directory name is the identity, not a display label. The same rule applies to `skills_data/` and `connectors/` subdirectories.
 - **Discovery**: agents looking for a capability the user has previously installed SHOULD check `~/.agent-guild/skills/` first before asking the user to install something.

@@ -26,7 +26,7 @@ The protocol consists of:
 
 1. A directory layout
 2. Read/write contracts for files in that layout
-3. A symlink-based update propagation mechanism
+3. A symlink-based update propagation mechanism (preferred: one directory link per runtime; fallback: per-skill links)
 4. A natural-language onboarding instruction (`SKILL.md`)
 
 ## 2. Central directory
@@ -98,7 +98,7 @@ Skills that adopt the convention **SHOULD** isolate mixed-sensitivity data into 
 ### 3.1 `skills/` — protocol-controlled
 
 - **Owner**: This project (Agent Guild maintainers).
-- **Distribution**: Each joined agent has a symlink `~/.<agent>/skills/agent-guild → ~/.agent-guild/skills/agent-guild/`. Agents read this on session start.
+- **Distribution**: A joined agent points its whole user-extensible skills dir at the guild — `<agent-skills-root> → ~/.agent-guild/skills/` — via ONE directory link (`ag link-root`; tier `dir-symlink`). Every guild skill is therefore live in that runtime, and updates propagate instantly. Fallback tier `symlink`: per-skill links `<agent-skills-root>/agent-guild → ~/.agent-guild/skills/agent-guild/`. Agents read the skill on session start.
 - **User MUST NOT** overwrite files here. Local edits will be overwritten on next protocol update.
 
 ### 3.2 `identity/`, `rules/`, `toolchain/`, `projects/` — user-controlled
@@ -136,7 +136,7 @@ Skills that adopt the convention **SHOULD** isolate mixed-sensitivity data into 
 
 - **Format**: Single JSON object (see [`manifest.json`](../manifest.json) for shape).
 - **Update mode**: In-place edit. Agents **MUST** update only their own entry.
-- **Required fields per agent**: `joined_at` (ISO 8601), `home` (~/.<agent>/), `last_seen` (ISO 8601), `protocol_version` (the version the agent joined under, copied from `manifest.json` at join time; **MUST** be `"3.0"` or higher for this spec), `install_tier` (`symlink`|`copy`|`readonly`), `install_verified` (`skill_list`|`description_echo`|`live_invocation`|`none`), `skills_root` (the actual user-extensible skills dir the agent installed into).
+- **Required fields per agent**: `joined_at` (ISO 8601), `home` (~/.<agent>/), `last_seen` (ISO 8601), `protocol_version` (the version the agent joined under, copied from `manifest.json` at join time; **MUST** be `"3.0"` or higher for this spec), `install_tier` (`dir-symlink`|`symlink`|`copy`|`readonly`), `install_verified` (`skill_list`|`description_echo`|`live_invocation`|`none`), `skills_root` (the actual user-extensible skills dir the agent installed into).
 - **Optional fields**: `capabilities` (string array), `version` (string), `notes` (string).
 
 ### 3.8 `learnings/*.md` — cross-agent self-improvement ledgers (3.1+)
@@ -159,7 +159,7 @@ The protocol deliberately separates **one-time joining** from **ongoing runtime 
 
 1. Verifying central directory access.
 2. **Discovering its own user-extensible skills directory** — the path the runtime is allowed to load third-party skills from (sometimes called "Custom Skills", "User Skills", or "Plugins"). Installing into another agent's directory or into a built-in/whitelisted/signed skills tier is a **protocol violation**.
-3. Installing the skill (preferred order: symlink → copy → readonly fallback).
+3. Installing the skill (preferred order: dir-symlink → per-skill symlink → copy → readonly fallback).
 4. **Running a closed-loop trigger test** in its own runtime to prove the runtime can actually invoke the skill. "Files on disk" is **NOT** success; "runtime can trigger this skill" is success. On failure, walking down the tier ladder autonomously and retesting.
 5. Registering its entry in `registry.json` (with `install_tier`, `install_verified`, `skills_root`).
 6. Handing off to the runtime skill for ongoing operations.
@@ -204,7 +204,8 @@ The active version **MUST** be declared in `SKILL.md` frontmatter and `manifest.
 
 | Tier | How updates propagate | Resync action required |
 |---|---|---|
-| `symlink` | Instant — local file is the central file | None |
+| `dir-symlink` | Instant — the runtime's whole skills dir IS the central `skills/` dir; new guild skills appear automatically, removals disappear automatically | None |
+| `symlink` | Instant — local file is the central file; new guild skills need one extra link each | None (per-skill links for new skills) |
 | `copy` | **Manual mirror** — agent must `rsync --delete` (POSIX) or `Robocopy /MIR` (Windows) to handle adds + modifies + **deletes + renames** | Mirror, not naive `cp -R` |
 | `readonly` | Instant — agent reads central files each session | None |
 

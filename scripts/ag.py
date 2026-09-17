@@ -12,6 +12,12 @@ Commands:
   init [agent]            Bootstrap ~/.agent-guild/ (idempotent, safe to re-run)
   find-root [agent]       Locate your user-extensible skills dir — instant,
                           never asks the user, READONLY fallback if not found
+  link-root [agent]       Consolidate to ONE directory link <skills_root> ->
+                          ~/.agent-guild/skills (replaces per-skill links,
+                          DRY-RUN report by default)
+  link-root --apply       Execute the consolidation: foreign links move into
+                          the guild, guild links go to trash, real skills
+                          abort with a pointer to `adopt --apply` first
   adopt [agent]           Scan agent home for adoptable assets (DRY-RUN report)
   adopt --apply [agent]   Move assets into the guild + link back
   bootstrap               Print all shared context (identity/rules/projects/focus)
@@ -351,18 +357,201 @@ def cmd_find_root(args: list) -> int:
     if sr and sr != "platform-managed":
         p = Path(sr).expanduser()
         if p.is_dir():
-            print(f"SKILLS_ROOT={p}\nTIER=copy-or-symlink  (from registry)")
+            print(f"SKILLS_ROOT={p}\nTIER=dir-symlink-if-supported  (from registry)")
+            print(f"NEXT=ag link-root {agent} --apply  (one link for ALL guild skills)")
             return 0
 
     for p in _candidate_roots(agent):
         if p.is_dir():
-            print(f"SKILLS_ROOT={p}\nTIER=symlink-if-supported")
+            print(f"SKILLS_ROOT={p}\nTIER=dir-symlink-if-supported")
+            print(f"NEXT=ag link-root {agent} --apply  (one link for ALL guild skills)")
             return 0
 
     print("SKILLS_ROOT=not-found")
     print("TIER=readonly")
     print("VERDICT=no user-extensible skills dir found — skip installation and "
           "join read-only (read central files each session). Do NOT ask the user.")
+    return 0
+
+
+# ------------------------------------------------------------- link-root ---
+
+def _locate_linkable_root(agent: str) -> Path | None:
+    """The agent's skills dir to consolidate: registry skills_root first,
+    then candidate roots. Only ever targets a DEDICATED skills directory —
+    an agent home itself (~/.<me>, ~/.config/<me>, ...) holds more than
+    skills and must never be replaced by a link."""
+    entry = load_registry().get("agents", {}).get(agent, {})
+    sr = entry.get("skills_root")
+    if sr and sr != "platform-managed":
+        return Path(sr).expanduser()
+    roots = _candidate_roots(agent)
+    agent_dirs = [p for p in roots if p.name != "skills" and p.is_dir()]
+    if not agent_dirs:
+        return None
+    # existing dedicated skills dir wins; else a creatable <agent-dir>/skills
+    for p in roots:
+        if p.name == "skills" and p.is_dir():
+            return p
+    for p in roots:
+        if p.name == "skills" and p.parent in agent_dirs:
+            return p
+    return None
+
+
+def cmd_link_root(args: list) -> int:
+    """Point the agent's whole skills dir at the guild with ONE directory link.
+
+    Replaces the per-skill link pattern (one symlink per guild skill) with a
+    single link <skills_root> -> ~/.agent-guild/skills, so every new guild
+    skill is instantly visible to the runtime — zero per-skill maintenance.
+
+    Safety model (never loses data):
+      - links pointing into the guild  -> moved to trash (dir link replaces them)
+      - links pointing elsewhere      -> moved INTO ~/.agent-guild/skills/
+      - real adoptable skills         -> abort: run `ag adopt --apply` first
+      - host-wired / platform items   -> abort: keep the per-skill tier
+    """
+    apply_ = "--apply" in args
+    rest = [a for a in args if not a.startswith("-")]
+    agent = default_agent(rest)
+    if not CENTRAL.is_dir():
+        print(f"{CENTRAL} missing — run `ag init` first", file=sys.stderr)
+        return 1
+    guild = CENTRAL / "skills"
+    if not guild.is_dir():
+        print(f"{guild} missing — run `ag init` first", file=sys.stderr)
+        return 1
+
+    root = _locate_linkable_root(agent)
+    if root is None:
+        print("SKILLS_ROOT=not-found — nothing to link; join read-only instead")
+        return 1
+
+    # Case 0: already a directory link to the guild
+    if root.is_symlink():
+        try:
+            consolidated = root.resolve() == guild.resolve()
+        except OSError:
+            consolidated = False
+        if consolidated:
+            print(f"already consolidated: {root} -> {guild}")
+            print(f"register (if not yet): ag register {agent} <home> dir-symlink {root}")
+            return 0
+        print(f"{root} is a symlink to elsewhere ({os.readlink(root)}) — "
+              "refusing to hijack it")
+        return 1
+
+    # Case 1: no skills dir yet — just create the directory link
+    if not root.exists():
+        if not root.parent.is_dir():
+            print(f"cannot create {root}: parent {root.parent} does not exist "
+                  "(never fabricate an agent home)")
+            return 1
+        if not apply_:
+            print(f"DRY-RUN — would link {root} -> {guild}")
+            print("re-run with --apply to execute")
+            return 0
+        ok, how = make_link(root, guild)
+        if not ok or not (root / "agent-guild" / "SKILL.md").is_file():
+            print(f"FAILED: {how}")
+            return 1
+        audit("link-root", {"agent": agent, "root": str(root), "mode": how})
+        print(f"linked {root} -> {guild} ({how})")
+        print("next: trigger-test the skill in your runtime, then "
+              f"`ag register {agent} <home> dir-symlink {root}`")
+        return 0
+
+    # Case 2: existing real directory — classify every child
+    guild_resolved = guild.resolve()
+    trash_items, move_items, adopt_items, block_items = [], [], [], []
+    try:
+        children = sorted(root.iterdir())
+    except OSError as e:
+        print(f"cannot read {root}: {e}", file=sys.stderr)
+        return 1
+    for child in children:
+        if child.is_symlink():
+            try:
+                inside = child.resolve().parent == guild_resolved
+            except OSError:
+                inside = False
+            (trash_items if inside else move_items).append(child)
+        elif child.name == ".DS_Store":
+            trash_items.append(child)
+        elif (child.is_dir() and (child / "SKILL.md").is_file()
+                and not _is_host_wired_skill(child)
+                and not _is_excluded(child.name, "skills")):
+            adopt_items.append(child)
+        else:
+            block_items.append(child)
+
+    print(f"{'CONSOLIDATING' if apply_ else 'DRY-RUN'} — "
+          f"one directory link {root} -> {guild}")
+    print(f"{'kind':<28} item")
+    print("-" * 78)
+    for c in trash_items:
+        print(f"{'trash (dir link covers)':<28} {c.name}")
+    for c in move_items:
+        print(f"{'move into guild':<28} {c.name} -> {os.readlink(c)}")
+    for c in adopt_items:
+        print(f"{'ADOPT FIRST (blocks)':<28} {c.name}")
+    for c in block_items:
+        print(f"{'CANNOT MOVE (blocks)':<28} {c.name}")
+    print("-" * 78)
+
+    if adopt_items:
+        print(f"{len(adopt_items)} real skill(s) still live outside the guild.")
+        print("Run `ag adopt " + agent + " --apply` first, then retry link-root.")
+        return 1
+    if block_items:
+        print(f"{len(block_items)} host-wired / platform-managed item(s) must stay "
+              "in a real directory — per-skill tier is the correct mode for "
+              "this runtime.")
+        return 1
+    if not apply_:
+        print("re-run with --apply to execute")
+        return 0
+
+    # Execute
+    for c in trash_items:
+        if not to_trash(c):
+            print(f"FAILED to trash {c} — aborted, nothing else touched")
+            return 1
+    for c in move_items:
+        dest = guild / c.name
+        if dest.exists() or dest.is_symlink():
+            # The guild already owns this name — the runtime-side link is
+            # redundant, recoverable-delete it.
+            if not to_trash(c):
+                print(f"FAILED to trash redundant link {c} — aborted")
+                return 1
+        else:
+            try:
+                shutil.move(str(c), str(dest))
+            except OSError as e:
+                print(f"FAILED to move {c} into the guild: {e} — aborted")
+                return 1
+    leftover = list(root.iterdir())
+    if leftover:
+        print(f"refusing to link: {root} is not empty after planning "
+              f"({', '.join(c.name for c in leftover)})")
+        return 1
+    try:
+        os.rmdir(root)
+    except OSError as e:
+        print(f"FAILED to remove emptied dir {root}: {e}")
+        return 1
+    ok, how = make_link(root, guild)
+    if not ok or not (root / "agent-guild" / "SKILL.md").is_file():
+        print(f"FAILED: {how} (original dir contents are in trash)")
+        return 1
+    audit("link-root", {"agent": agent, "root": str(root), "mode": how,
+                        "trashed": len(trash_items), "moved": len(move_items)})
+    print(f"linked {root} -> {guild} ({how})")
+    print(f"consolidated: trashed={len(trash_items)} moved_into_guild={len(move_items)}")
+    print("next: trigger-test the skill in your runtime, then "
+          f"`ag register {agent} <home> dir-symlink {root}`")
     return 0
 
 
@@ -1058,6 +1247,41 @@ def cmd_doctor(args: list) -> int:
         problems += len(agent_dangling)
     else:
         print("  ok — none")
+
+    print("\n== skills dir consolidation (advisory, not an error) ==")
+    guild_resolved = (CENTRAL / "skills").resolve()
+    consolidated = per_skill = 0
+    for name, entry in reg.get("agents", {}).items():
+        sr = entry.get("skills_root")
+        if not sr or sr == "platform-managed":
+            continue
+        d = Path(sr).expanduser()
+        if d.is_symlink():
+            try:
+                if d.resolve() == guild_resolved:
+                    consolidated += 1
+                    continue
+            except OSError:
+                pass
+        n = 0
+        if d.is_dir():
+            try:
+                for child in d.iterdir():
+                    if child.is_symlink():
+                        try:
+                            if child.resolve().parent == guild_resolved:
+                                n += 1
+                        except OSError:
+                            pass
+            except OSError:
+                pass
+        if n:
+            per_skill += 1
+            print(f"  ℹ [{name}] {n} per-skill link(s) into the guild — "
+                  f"consolidate: `ag link-root {name} --apply`")
+    if not per_skill:
+        print("  ok — no per-skill link sprawl detected")
+    print(f"  (dir-linked agents: {consolidated}, per-skill agents: {per_skill})")
 
     print("\n== core protocol files ==")
     required = [
@@ -1855,6 +2079,7 @@ def main() -> int:
     table = {
         "init": cmd_init,
         "find-root": cmd_find_root,
+        "link-root": cmd_link_root,
         "adopt": cmd_adopt,
         "bootstrap": cmd_bootstrap,
         "doctor": cmd_doctor,

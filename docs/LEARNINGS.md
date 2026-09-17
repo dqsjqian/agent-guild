@@ -136,8 +136,10 @@ Extraction workflow:
    YAML frontmatter with `name` + `description`, Quick-Reference table,
    self-contained examples, `Source: <entry-id>` at the bottom).
 2. Because `skills/` is the **shared skill bus** (Convention 0), the new
-   skill is immediately available to every joined agent — link it into your
-   own runtime's skills dir per the usual tier rules (symlink → copy → readonly).
+   skill is immediately available to every joined agent — on the dir-symlink
+   tier (`ag link-root`) it appears in every consolidated runtime with zero
+   action; per-skill-tier runtimes link it into their own skills dir per the
+   usual tier rules (per-skill symlink → copy → readonly).
 3. Update the entry: `Status: promoted_to_skill` + `Skill-Path: skills/<name>`.
 
 Quality gates before extraction:

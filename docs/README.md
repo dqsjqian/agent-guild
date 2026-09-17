@@ -40,10 +40,10 @@
 └── tools/<name>/                ← Shared CLI scripts/utilities
 ```
 
-Every joined agent has a symlink:
+Every joined agent points its whole skills dir at the guild with ONE directory link:
 
 ```bash
-~/.<your-agent>/skills/agent-guild → ~/.agent-guild/skills/agent-guild/
+~/.<your-agent>/skills → ~/.agent-guild/skills/
 ```
 
 That's it. **No daemon. No server. No npm install. No third-party runtime. Pure filesystem.**
@@ -81,7 +81,7 @@ If the agent can't figure it out, **the agent isn't smart enough for your workfl
 
 The protocol cleanly separates **one-time joining** from **ongoing capabilities**:
 
-- **`ONBOARDING.md`** (one-time): discover your runtime's user-extensible skills directory, install the skill (symlink → copy → readonly fallback), run a closed-loop trigger test to prove the runtime can actually invoke it, register in `registry.json`.
+- **`ONBOARDING.md`** (one-time): discover your runtime's user-extensible skills directory, consolidate it into ONE directory link to the guild (`ag link-root`; fallbacks: per-skill symlink → copy → readonly), run a closed-loop trigger test to prove the runtime can actually invoke it, register in `registry.json`.
 - **`SKILL.md`** (recurring): read shared identity / rules / current focus; check inbox / send messages; append daily logs; refresh `last_seen`. This is the runtime capability the joined agent carries forward.
 
 See [`ONBOARDING.md`](ONBOARDING.md) for the joining flow.
@@ -94,7 +94,7 @@ See [`manifest.json`](../manifest.json) for the machine-readable spec.
 
 ## Single source of truth — automatic protocol updates
 
-Each joined agent's `~/.<agent>/skills/agent-guild/` is a **symlink** back to the central `~/.agent-guild/skills/agent-guild/`. When this project ships a protocol update, you update the central dir; **every agent on the user's machine sees the new version on its next session start**. No push notifications, no version checks, no hash comparison. Just filesystem semantics doing what filesystem semantics do.
+Each joined agent's `~/.<agent>/skills/` is **one directory symlink** to the central `~/.agent-guild/skills/`. When this project ships a protocol update, you update the central dir; **every agent on the user's machine sees the new version on its next session start**. No push notifications, no version checks, no hash comparison. Better still: a new skill any agent installs into the guild appears in every consolidated runtime instantly — no per-skill relinking, ever. (Fallback tier: per-skill symlinks.)
 
 User-owned files (`identity/`, `rules/`, `toolchain/`, etc.) are **never overwritten by upstream** — they live next to but outside the symlinked `skills/`.
 
@@ -126,7 +126,7 @@ Then tell your agent:
 
 > "Read `~/.agent-guild/ONBOARDING.md` and join Agent Guild."
 
-The agent will figure out how to integrate with itself (symlink, copy, or read-only fallback — see ONBOARDING.md).
+The agent will figure out how to integrate with itself (one directory link, per-skill links, copy, or read-only fallback — see ONBOARDING.md).
 
 (Windows users: replace `~` with `$HOME` in PowerShell, and use `New-Item -ItemType SymbolicLink` instead of `ln -s`.)
 

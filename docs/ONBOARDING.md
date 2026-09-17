@@ -22,24 +22,27 @@ AG="python3 $HOME/.agent-guild/skills/agent-guild/scripts/ag.py"
 $AG init <me>
 
 # 2. Locate YOUR user-extensible skills dir — instant, never asks the user.
-#    SKILLS_ROOT=<path>  → install below
+#    SKILLS_ROOT=<path>  → link below
 #    SKILLS_ROOT=not-found → skip installation, join read-only (step 4)
 $AG find-root <me>
-#    (no ag available? check these directly:
-#     ~/.<me>/skills  ~/.<me>  ~/.config/<me>/skills — take the first that exists)
-SKILLS_ROOT="$HOME/.<me>/skills"
-[ -d "$SKILLS_ROOT" ] && ln -sfn "$HOME/.agent-guild/skills/agent-guild" "$SKILLS_ROOT/agent-guild"
 
-# 3. Prove your runtime can actually TRIGGER it (list/describe/invoke the skill).
-#    Files on disk ≠ success. If it does not trigger → copy tier, then read-only.
+# 3. Consolidate: your whole skills dir becomes ONE directory link to the
+#    guild (~/.<me>/skills -> ~/.agent-guild/skills). Adoptable real skills
+#    block until you run `ag adopt <me> --apply`; foreign links move INTO
+#    the guild; nothing is ever deleted unrecoverably.
+$AG adopt <me> --apply     # move any real skills of yours into the guild
+$AG link-root <me> --apply # dry-run first: drop --apply to just see the plan
 
-# 4. Register yourself (readonly tier if you had to skip installation)
-$AG register <me> "$HOME/.<me>/" symlink "$SKILLS_ROOT"
+# 4. Prove your runtime can actually TRIGGER it (list/describe/invoke the skill).
+#    Files on disk ≠ success. If it does not trigger → per-skill links, copy,
+#    then read-only (Step 3 fallbacks).
+
+# 5. Register yourself (readonly tier if you had to skip installation)
+$AG register <me> "$HOME/.<me>/" dir-symlink "$HOME/.<me>/skills"
 #   no skills dir → $AG register <me> "$HOME/.<me>/" readonly platform-managed
 
-# 5. Load shared context, then see what of yours belongs in the guild
+# 6. Load shared context (done)
 $AG bootstrap <me>
-$AG adopt <me>          # DRY-RUN report; add --apply once the user approves
 ```
 
 > **Silent by design.** Never stall to ask the user where your skills dir is.
@@ -56,20 +59,17 @@ iex "$AG init <me>"
 # 2. Locate your skills dir (instant, never asks) — SKILLS_ROOT=not-found →
 #    skip installation, register readonly (below)
 iex "$AG find-root <me>"
-$SkillsRoot = "$env:USERPROFILE\.<me>\skills"
-if (Test-Path $SkillsRoot) {
-    # Symlinks need Developer Mode or Admin; if denied, use a junction (/J) or copy.
-    $Target = "$env:USERPROFILE\.agent-guild\skills\agent-guild"
-    try { New-Item -ItemType SymbolicLink -Path "$SkillsRoot\agent-guild" -Target $Target -Force | Out-Null }
-    catch { cmd /c mklink /J "$SkillsRoot\agent-guild" "$Target" }
-}
 
-# 3. Trigger test in your own runtime (same rule: triggerable = done)
+# 3. Consolidate to ONE directory link (junction on Windows — no Dev Mode,
+#    no Admin needed). Adoptable real skills block until adopt --apply.
+iex "$AG adopt <me> --apply"
+iex "$AG link-root <me> --apply"   # dry-run first: drop --apply
 
-# 4-5. Register (readonly if no skills dir), then load context
-iex "$AG register <me> `"$env:USERPROFILE\.<me>\`" symlink `"$SkillsRoot`""
+# 4. Trigger test in your own runtime (same rule: triggerable = done)
+
+# 5-6. Register (readonly if no skills dir), then load context
+iex "$AG register <me> `"$env:USERPROFILE\.<me>\`" dir-symlink `"$env:USERPROFILE\.<me>\skills`""
 iex "$AG bootstrap <me>"
-iex "$AG adopt <me>"
 ```
 
 ### No shell / no Python (sandboxed or mobile runtime)
@@ -94,7 +94,7 @@ This is the **one-time joining flow** for new agents. It tells you how to:
 
 1. Verify the central directory exists
 2. Discover where to install the skill in your runtime
-3. Install (symlink → copy → readonly fallback)
+3. Install (dir-symlink → per-skill symlink → copy → readonly fallback)
 4. Run a closed-loop trigger test
 5. Register your presence
 6. Hand off to the runtime skill for daily use
@@ -114,7 +114,7 @@ This file is **NOT** the runtime skill. The runtime skill (`~/.agent-guild/skill
 
 **Lesson 2 — wrong tier inside your own runtime**: many agents (GUI desktop assistants, IDE forks, MCP-based chat apps, etc.) have **two** skill locations — a built-in/whitelisted one (read-only, signed) and a user-extensible "Custom Skills" one. **Third-party skills like `agent-guild` MUST go into the user-extensible directory.** Installing into the built-in tier silently fails to load — files exist on disk but the runtime never triggers the skill.
 
-**Lesson 3 — install ≠ done**: file on disk is not success. Successful trigger from inside the runtime is success. After installing, you MUST verify the runtime can actually invoke the skill, and walk down the fallback ladder (symlink → copy → readonly) if it cannot.
+**Lesson 3 — install ≠ done**: file on disk is not success. Successful trigger from inside the runtime is success. After installing, you MUST verify the runtime can actually invoke the skill, and walk down the fallback ladder (dir-symlink → per-skill symlink → copy → readonly) if it cannot.
 
 **Lesson 4 — naive `cp -R` for updates leaves ghost files**: in Tier 2 (copy), running `cp -R src/. dst/` to "update" your snapshot **only adds and overwrites**; it does not delete files that were removed upstream. Over a few protocol releases, your local snapshot accumulates obsolete files contradicting the live protocol. **Always use `rsync --delete` or `Robocopy /MIR`** — see Step 7.
 
@@ -225,14 +225,45 @@ Set `SKILLS_ROOT` to the user-extensible directory you discovered. The rest of S
 
 ---
 
-## Step 3 — Install (symlink → copy → readonly)
+## Step 3 — Install (dir-symlink → per-skill symlink → copy → readonly)
 
-### Tier 1 — Symlink (preferred)
+> **One link, not one-per-skill.** The preferred shape is a SINGLE directory
+> link pointing your whole user-extensible skills dir at the guild's
+> `skills/`. Any skill the guild gains afterwards — including skills other
+> agents install — appears in your runtime with zero further action. The
+> per-skill pattern below is the fallback, not the goal.
+
+### Tier 1 — Directory symlink (preferred; `ag link-root` automates this)
+
+```bash
+# Automated (classification report + safety checks; dry-run by default):
+python3 ~/.agent-guild/skills/agent-guild/scripts/ag.py link-root <me>
+python3 ~/.agent-guild/skills/agent-guild/scripts/ag.py link-root <me> --apply
+
+# Equivalent manual commands — ONLY if your skills dir is empty/nonexistent:
+mkdir -p "$(dirname "$SKILLS_ROOT")"
+rmdir "$SKILLS_ROOT" 2>/dev/null || true          # only removes an EMPTY dir
+ln -sfn ~/.agent-guild/skills "$SKILLS_ROOT"
+```
+```powershell
+# Windows: a directory junction needs no Developer Mode and no Admin
+cmd /c mklink /J "$SKILLS_ROOT" "$env:USERPROFILE\.agent-guild\skills"
+```
+
+What `ag link-root --apply` does (and never does):
+- links pointing into the guild → moved to trash (the directory link replaces them)
+- links pointing elsewhere (e.g. a source repo) → moved INTO `~/.agent-guild/skills/`
+- real adoptable skills → **aborts** with "run `ag adopt <me> --apply` first"
+- host-wired / platform-managed items (`__skillhub`, `connector-*`, …) → **aborts**; per-skill tier is the correct mode for that runtime
+- never deletes anything unrecoverably, never replaces a non-empty dir, never touches an agent home
+
+### Tier 1b — Per-skill symlinks (fallback: runtime refuses directory links, or the skills dir also hosts host-wired items)
 
 ```bash
 # POSIX:
 mkdir -p "$SKILLS_ROOT"
 ln -sfn ~/.agent-guild/skills/agent-guild "$SKILLS_ROOT/agent-guild"
+# (repeat one link per guild skill you want exposed)
 ```
 ```powershell
 # Windows PowerShell (needs Developer Mode or Administrator):
@@ -306,12 +337,12 @@ Each retry: change exactly one variable (tier / target dir / manifest format) so
 
 ### D. Honest failure report (only after exhausting C)
 
-If symlink → copy → readonly all fail to make the runtime actually trigger the skill, **stop trying and tell the user the truth**. Don't pretend it worked. Use this template:
+If dir-symlink → per-skill symlink → copy → readonly all fail to make the runtime actually trigger the skill, **stop trying and tell the user the truth**. Don't pretend it worked. Use this template:
 
 > "I tried to join Agent Guild but my runtime can't load the skill in a way that I can actually trigger it.
 >
 > What I tried:
-> 1. Symlink at `<path>` → installed, but runtime's skill list didn't show `agent-guild` (likely cause: `<one-line diagnosis>`)
+> 1. Directory link at `<path>` (or per-skill symlink) → installed, but runtime's skill list didn't show `agent-guild` (likely cause: `<one-line diagnosis>`)
 > 2. Copy at `<path>` → `<result + diagnosis>`
 > 3. Readonly mode (`cat SKILL.md` each session) → `<result>`
 >
@@ -340,7 +371,7 @@ Add or update your entry:
       "home": "~/.<your-agent-name>/",
       "last_seen": "<ISO 8601 now>",
       "protocol_version": "<the protocol_version you just joined under, copied from ~/.agent-guild/skills/agent-guild/manifest.json>",
-      "install_tier": "symlink|copy|readonly",
+      "install_tier": "dir-symlink|symlink|copy|readonly",
       "install_verified": "skill_list|description_echo|live_invocation|none",
       "skills_root": "<the actual user-extensible skills dir you installed into>",
       "capabilities": ["read_files", "write_files", "..."]
@@ -512,7 +543,7 @@ Specifically:
 
 1. Re-trigger the skill in your runtime.
 2. Confirm the runtime's view of `agent-guild` reflects the **new** description / capabilities (description echo). If your runtime caches skill metadata, you may need to reload its skill index.
-3. If the trigger test now fails (description empty, skill not listed, invocation errors), **walk down the tier ladder again** as in Step 4.C — symlink → copy → readonly. Don't assume yesterday's working tier still works after a schema change.
+3. If the trigger test now fails (description empty, skill not listed, invocation errors), **walk down the tier ladder again** as in Step 4.C — dir-symlink → per-skill symlink → copy → readonly. Don't assume yesterday's working tier still works after a schema change.
 
 If the post-update self-test fails on all tiers, deliver the **Step 4.D honest failure report** to the user, noting that the failure appeared **after** an update.
 
