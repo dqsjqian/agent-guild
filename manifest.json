@@ -2,7 +2,7 @@
   "$schema": "https://github.com/dqsjqian/agent-guild/raw/main/spec/manifest.schema.json",
   "name": "agent-guild",
   "protocol_version": "3.2",
-  "skill_version": "3.7.1",
+  "skill_version": "3.7.2",
   "spec_url": "https://github.com/dqsjqian/agent-guild/blob/main/docs/SPEC.md",
   "onboarding_url": "https://github.com/dqsjqian/agent-guild/blob/main/docs/ONBOARDING.md",
   "skill_url": "https://github.com/dqsjqian/agent-guild/blob/main/SKILL.md",
@@ -84,6 +84,11 @@
       "summary": "Bootstrap ~/.agent-guild/ when it does not exist: create the full protocol + convention skeleton (identity/rules/toolchain/projects/handoff/log/skills/skills_data/mcp/plugins/tools/memory), seed placeholder context files and registry.json, and install the agent-guild skill itself into skills/agent-guild/. Idempotent — safe to re-run every session; never clobbers existing data, only fills gaps.",
       "cmd": "python3 <skill_dir>/scripts/ag.py init <agent>",
       "write_mode": "create_if_missing"
+    },
+    "link_root": {
+      "summary": "Consolidate the calling agent's whole user-extensible skills directory into ONE directory link <skills_root> -> ~/.agent-guild/skills, replacing the per-skill link pattern. New guild skills become visible to the runtime with zero per-skill maintenance. DEFAULT IS DRY-RUN — prints a classification report (links the guild already owns -> trash; foreign links -> moved INTO the guild; real adoptable skills -> abort, run adopt --apply first; host-wired / platform-managed items -> abort, keep per-skill tier) and changes nothing; only `--apply` executes. Only ever targets a dedicated skills directory, never an agent home itself. Windows directory junctions are detected via their reparse tag (Path.is_symlink() is False for junctions), so an already-junctioned skills dir is recognized as consolidated instead of being mistaken for unadopted skills. Recoverable deletes only; links are unlinked rather than trashed so a trash helper can never follow one into its target.",
+      "cmd": "python3 <skill_dir>/scripts/ag.py link-root <agent> [--apply]",
+      "write_mode": "move_and_symlink"
     },
     "adopt": {
       "summary": "Self-audit the calling agent's home for assets that belong in the guild (skills / skills_data / mcp / tools / memory), then move them in and symlink back so the runtime keeps working. DEFAULT IS DRY-RUN — prints a candidate report and changes nothing; only `--apply` executes. Excludes rebuildable caches (.venv/node_modules/__pycache__/browsers, *.app/*.pid/*.log/*.pyc), credential stores (config.json etc.), runtime-internal bookkeeping (agent-created-skills.json etc.), platform-managed packages (__skillhub/connector-*) and connector-backed skills. Credentials are NEVER adopted (connectors/ is manually placed). Every move is verified after linking and automatically rolled back on failure. Deletions go to trash, never rm.",

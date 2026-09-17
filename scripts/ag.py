@@ -55,6 +55,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -428,8 +429,8 @@ def cmd_link_root(args: list) -> int:
         print("SKILLS_ROOT=not-found — nothing to link; join read-only instead")
         return 1
 
-    # Case 0: already a directory link to the guild
-    if root.is_symlink():
+    # Case 0: already a link to the guild (symlink OR Windows junction)
+    if is_link(root):
         try:
             consolidated = root.resolve() == guild.resolve()
         except OSError:
@@ -438,7 +439,7 @@ def cmd_link_root(args: list) -> int:
             print(f"already consolidated: {root} -> {guild}")
             print(f"register (if not yet): ag register {agent} <home> dir-symlink {root}")
             return 0
-        print(f"{root} is a symlink to elsewhere ({os.readlink(root)}) — "
+        print(f"{root} is already a link elsewhere ({link_target(root)}) — "
               "refusing to hijack it")
         return 1
 
@@ -471,7 +472,7 @@ def cmd_link_root(args: list) -> int:
         print(f"cannot read {root}: {e}", file=sys.stderr)
         return 1
     for child in children:
-        if child.is_symlink():
+        if is_link(child):
             # A link is redundant if the guild already owns that name (either
             # the link points straight into skills/, or skills/<name> exists
             # and only resolves further out, e.g. a source-repo symlink).
@@ -480,7 +481,7 @@ def cmd_link_root(args: list) -> int:
             except OSError:
                 inside = False
             dest = guild / child.name
-            redundant = inside or dest.exists() or dest.is_symlink()
+            redundant = inside or dest.exists() or is_link(dest)
             (trash_items if redundant else move_items).append(child)
         elif child.name == ".DS_Store":
             trash_items.append(child)
@@ -498,7 +499,7 @@ def cmd_link_root(args: list) -> int:
     for c in trash_items:
         print(f"{'trash (guild already has it)':<28} {c.name}")
     for c in move_items:
-        print(f"{'move into guild':<28} {c.name} -> {os.readlink(c)}")
+        print(f"{'move into guild':<28} {c.name} -> {link_target(c)}")
     for c in adopt_items:
         print(f"{'ADOPT FIRST (blocks)':<28} {c.name}")
     for c in block_items:
@@ -525,7 +526,7 @@ def cmd_link_root(args: list) -> int:
             return 1
     for c in move_items:
         dest = guild / c.name
-        if dest.exists() or dest.is_symlink():
+        if dest.exists() or is_link(dest):
             # The guild already owns this name — the runtime-side link is
             # redundant, recoverable-delete it.
             if not to_trash(c):
@@ -578,7 +579,13 @@ def to_trash(path: Path) -> bool:
     Tries the OS trash helper first (`trash` on macOS, `gio trash` / `trash-put`
     on Linux, Recycle Bin via PowerShell on Windows); otherwise moves the path
     into the guild's own .trash/<timestamp>/ so nothing is ever unrecoverable.
+
+    Links are unlinked, never trashed: a trash helper (or a cross-device
+    `shutil.move`) can follow a symlink/junction and take the TARGET with it.
+    Dropping a link loses no data — the target stays exactly where it is.
     """
+    if is_link(path):
+        return drop_link(path)
     for cmd in (["trash"], ["trash-put"], ["gio", "trash"]):
         exe = shutil.which(cmd[0])
         if exe:
@@ -630,6 +637,60 @@ def make_link(link: Path, target: Path) -> Tuple[bool, str]:
             except OSError:
                 pass
     return False, f"link failed: {first}"
+
+
+# Windows reparse tags. Defined in `stat` only on Windows (3.8+), so the
+# literals are the fallback when the attribute is missing.
+_TAG_MOUNT_POINT = getattr(stat, "IO_REPARSE_TAG_MOUNT_POINT", 0xA0000003)
+_TAG_SYMLINK = getattr(stat, "IO_REPARSE_TAG_SYMLINK", 0xA000000C)
+
+
+def is_link(p: Path) -> bool:
+    """True for symlinks AND Windows directory junctions.
+
+    `Path.is_symlink()` is False for a junction (IO_REPARSE_TAG_MOUNT_POINT)
+    even though `make_link` creates junctions on Windows as the
+    no-privilege fallback. Without this, a junctioned skills dir looks like
+    an ordinary directory, and adopt / link-root would try to move the
+    guild's own files back into the guild.
+    """
+    try:
+        if p.is_symlink():
+            return True
+    except OSError:
+        return False
+    if os.name != "nt":
+        return False
+    try:
+        tag = os.lstat(p).st_reparse_tag  # Windows-only attribute
+    except (OSError, ValueError, AttributeError):
+        return False
+    return tag in (_TAG_MOUNT_POINT, _TAG_SYMLINK)
+
+
+def link_target(p: Path) -> str:
+    """Readable link target. os.readlink handles junctions on 3.8+; fall
+    back to the resolved path when it does not."""
+    try:
+        return os.readlink(p)
+    except OSError:
+        try:
+            return str(p.resolve())
+        except OSError:
+            return "?"
+
+
+def drop_link(p: Path) -> bool:
+    """Remove a link itself, never its target. A junction needs rmdir."""
+    try:
+        p.unlink()
+        return True
+    except OSError:
+        try:
+            os.rmdir(p)
+            return True
+        except OSError:
+            return False
 
 
 # ------------------------------------------------------------------- init ---
@@ -988,7 +1049,7 @@ def _scan_dir(src_dir: Path, dest_root: str) -> list[dict]:
     if not src_dir.is_dir():
         return found
     for child in sorted(src_dir.iterdir()):
-        if child.is_symlink():
+        if is_link(child):
             continue  # already linked somewhere — nothing to adopt
         if _is_excluded(child.name, dest_root):
             continue
@@ -1044,7 +1105,7 @@ def _scan_agent(home: Path, agent: str) -> list[dict]:
     # agent-private memory files sitting at the home root
     for fname in MEMORY_FILES:
         f = home / fname
-        if f.is_file() and not f.is_symlink():
+        if f.is_file() and not is_link(f):
             add(f, CENTRAL / "memory" / agent / fname, "memory")
     return items
 
@@ -1114,7 +1175,7 @@ def cmd_adopt(args: list) -> int:
     moved = skipped = failed = 0
     for it in items:
         src, dest, kind = it["src"], it["dest"], it["kind"]
-        if dest.exists() or dest.is_symlink():
+        if dest.exists() or is_link(dest):
             print(f"{kind:<12} {src.name:<34} skip (already in guild)")
             skipped += 1
             continue
@@ -1220,11 +1281,11 @@ def cmd_doctor(args: list) -> int:
     for root, dirs, files in os.walk(CENTRAL, followlinks=False):
         for name in list(dirs) + files:
             p = Path(root) / name
-            if p.is_symlink() and not p.exists():
+            if is_link(p) and not p.exists():
                 dangling.append(p)
     if dangling:
         for p in dangling:
-            print(f"  ✗ {p} -> {os.readlink(p)}")
+            print(f"  ✗ {p} -> {link_target(p)}")
         problems += len(dangling)
     else:
         print("  ok — none")
@@ -1244,11 +1305,11 @@ def cmd_doctor(args: list) -> int:
         except OSError:
             continue
         for child in children:
-            if child.is_symlink() and not child.exists():
+            if is_link(child) and not child.exists():
                 agent_dangling.append((name, child))
     if agent_dangling:
         for name, p in agent_dangling:
-            print(f"  ✗ [{name}] {p} -> {os.readlink(p)}")
+            print(f"  ✗ [{name}] {p} -> {link_target(p)}")
         problems += len(agent_dangling)
     else:
         print("  ok — none")
@@ -1261,7 +1322,7 @@ def cmd_doctor(args: list) -> int:
         if not sr or sr == "platform-managed":
             continue
         d = Path(sr).expanduser()
-        if d.is_symlink():
+        if is_link(d):
             try:
                 if d.resolve() == guild_resolved:
                     consolidated += 1
@@ -1272,7 +1333,7 @@ def cmd_doctor(args: list) -> int:
         if d.is_dir():
             try:
                 for child in d.iterdir():
-                    if child.is_symlink():
+                    if is_link(child):
                         try:
                             if child.resolve().parent == guild_resolved:
                                 n += 1

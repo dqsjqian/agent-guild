@@ -250,6 +250,12 @@ ln -sfn ~/.agent-guild/skills "$SKILLS_ROOT"
 cmd /c mklink /J "$SKILLS_ROOT" "$env:USERPROFILE\.agent-guild\skills"
 ```
 
+> **Windows junctions count as consolidated.** `ag` detects a junction via its
+> reparse tag, not `is_symlink()` (which is always False for junctions). So a
+> junctioned skills dir is recognized as already linked and is never mistaken
+> for a real directory full of "unadopted" skills. Register it as
+> `dir-symlink` — the tier name covers symlink and junction alike.
+
 What `ag link-root --apply` does (and never does):
 - links pointing into the guild → moved to trash (the directory link replaces them)
 - links pointing elsewhere (e.g. a source repo) → moved INTO `~/.agent-guild/skills/`
