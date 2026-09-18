@@ -1,6 +1,6 @@
 # Agent Guild Specification
 
-**Protocol version: 3.2**
+**Protocol version: 3.3**
 **Status: Draft**
 
 This document is the normative specification for Agent Guild. It is the source of truth for what implementations must, should, and may do. The keywords **MUST**, **SHOULD**, **MAY** follow [RFC 2119](https://www.rfc-editor.org/rfc/rfc2119).
@@ -12,6 +12,8 @@ This document is the normative specification for Agent Guild. It is the source o
 > **Changes from 3.0 → 3.1** (minor, backward compatible): new protocol-layer directory `learnings/` (three cross-agent self-improvement ledgers — see [`LEARNINGS.md`](LEARNINGS.md)) and new CLI commands `ag learn` / `ag review` / `ag resolve`. Agents joined under 3.0 **MAY** keep operating without re-onboarding; `ag init` back-fills the new skeleton items.
 
 > **Changes from 3.1 → 3.2** (minor, backward compatible): built-in data hygiene. New user-editable policy file `RETENTION.md`, new archive sub-directories (`log/archive/` already implied, now `handoff/shared-state/archive/` and `learnings/archive/`), new CLI command `ag groom`, and a rate-limited auto-groom hook at the end of `ag bootstrap`. Groom moves expired data into archives or the recoverable trash — it never hard-deletes (see §6.5). Agents joined under 3.1 **MAY** keep operating without re-onboarding; `ag init` back-fills the new skeleton items.
+
+> **Changes from 3.2 → 3.3** (minor, backward compatible): device scoping. A guild directory may be carried between devices with different operating systems, so every stored fact now has a declared scope — `shared`, `platform`, or `host` (§10). New top-level directory `hosts/<host-id>/` holds device-scoped state, `registry.json` entries gain a per-device `hosts` block, `tools/<name>/tool.json` declares per-platform executables, and the link-direction invariant (§3.10) is stated normatively. New CLI commands `ag platform`, `ag tool`, `ag tools`, `ag port`. Agents joined under 3.2 **MAY** keep operating without re-onboarding; `ag init` claims the current device and back-fills the new skeleton items.
 
 ## 1. Goals
 
@@ -75,6 +77,12 @@ The central directory contains TWO layers, physically siblings but semantically 
 │   ├── archive/        ← processed messages
 │   └── shared-state/   ← shared task state (edit-in-place)
 │       └── archive/    ← rotated old current-focus blocks (3.2+)
+├── hosts/              ← device-scoped state, one dir per device (3.3+)
+│   └── <host-id>/
+│       ├── host.json       ← os / arch / link capability / python
+│       ├── host-notes.md   ← user-owned: true on THIS device only
+│       ├── VERSION         ← skill + protocol version installed here
+│       └── groom.json      ← last data-hygiene run on this device
 └── registry.json       ← list of joined agents
 ```
 
@@ -110,7 +118,7 @@ Skills that adopt the convention **SHOULD** isolate mixed-sensitivity data into 
 ### 3.3 `log/daily/<YYYY-MM-DD>-<agent>.md` — per-agent append-only
 
 - **Owner**: The named agent.
-- **Naming**: `<YYYY-MM-DD>-<agent-lowercase-name>.md`. Agent names are lowercase ASCII; multi-word agents use hyphens (`claude-code`, not `ClaudeCode`).
+- **Naming**: `<YYYY-MM-DD>-<agent-lowercase-name>.md`. Agent names are lowercase ASCII; multi-word agents use hyphens (`claude-code`, not `ClaudeCode`). When more than one device is registered under `hosts/` (3.3+), implementations **SHOULD** append `.<host-id>` before the extension so two devices appending on the same day cannot collide. Readers **SHOULD** glob `<YYYY-MM-DD>-<agent>*.md`.
 - **Write mode**: Append-only. Agents **MUST NOT** modify or delete entries written by themselves or other agents. (Relocating an *entire expired file* into `log/archive/` via groom §7 is not a violation — entries are preserved verbatim.)
 - **Content**: Markdown. Each entry **SHOULD** include a timestamp.
 
@@ -138,6 +146,13 @@ Skills that adopt the convention **SHOULD** isolate mixed-sensitivity data into 
 - **Update mode**: In-place edit. Agents **MUST** update only their own entry.
 - **Required fields per agent**: `joined_at` (ISO 8601), `home` (~/.<agent>/), `last_seen` (ISO 8601), `protocol_version` (the version the agent joined under, copied from `manifest.json` at join time; **MUST** be `"3.0"` or higher for this spec), `install_tier` (`dir-symlink`|`symlink`|`copy`|`readonly`), `install_verified` (`skill_list`|`description_echo`|`live_invocation`|`none`), `skills_root` (the actual user-extensible skills dir the agent installed into).
 - **Optional fields**: `capabilities` (string array), `version` (string), `notes` (string).
+- **Device scoping (3.3+)**: `home`, `skills_root`, `install_tier`, `install_verified` and `last_seen` are properties of one **device**, not of the agent. Implementations **MUST** write them into `agents.<name>.hosts.<host-id>` and **SHOULD** keep the flat fields as a compatibility mirror for pre-3.3 readers on the same device (`mirror_host` records which device the mirror describes). An entry that carries `hosts` blocks but none for the current `host-id` describes an install on another device: readers **MUST NOT** report its paths as drift. An entry with no `hosts` block at all predates 3.3 and **MUST** be read as describing the current device.
+
+### 3.10 Link direction — the guild owns its payloads
+
+- A link inside the guild whose target lies **outside** the guild is a **protocol violation**: the payload then exists on exactly one device, and every other device sees a dangling link. Implementations **MUST** report it and **SHOULD** offer to internalize it (move the payload into the guild, then link the former external path back in).
+- Links pointing **into** the guild (a runtime's skills dir, a project checkout, a convenience path in `~/bin`) are the normal, portable direction and are **RECOMMENDED**.
+- Links that stay inside the guild **MUST** be relative. An absolute intra-guild link breaks as soon as the user name, home directory, or drive letter differs.
 
 ### 3.8 `learnings/*.md` — cross-agent self-improvement ledgers (3.1+)
 
@@ -262,7 +277,10 @@ Report-only findings (never auto-fixed): stale unread inbox messages, `.trash/` 
 
 This protocol does **not** address:
 
-- Multi-user shared memory (different machines / different humans).
+- Multi-user shared memory (different humans).
+- Transporting the guild between devices. The protocol makes the directory
+  *safe to carry* (§10); choosing and running the carrier is out of scope, and
+  a conforming implementation performs no network access for this purpose.
 - Encrypted at-rest storage (defer to filesystem-level encryption).
 - Real-time bidirectional sync between agents (use `handoff/inbox/` instead).
 - Schema validation of user-controlled content.
@@ -273,5 +291,52 @@ This protocol does **not** address:
 - Repository: https://github.com/dqsjqian/agent-guild
 - Onboarding (one-time): [`ONBOARDING.md`](ONBOARDING.md)
 - Runtime skill: [`SKILL.md`](../SKILL.md)
+- Cross-device portability: [`PORTABILITY.md`](PORTABILITY.md)
 - Manifest: [`manifest.json`](../manifest.json)
 - License: MIT
+
+## 10. Device scoping (3.3+)
+
+A guild directory is frequently carried between devices that do not share an
+operating system. Protocol 3.3 therefore requires every stored fact to have a
+scope, so that a device can distinguish "this applies to me" from "this
+belongs to another device".
+
+### 10.1 Scopes
+
+| Scope | Test | Location |
+|---|---|---|
+| `shared` | True on any device | Normal guild paths (`identity/`, `rules/`, `projects/`, `memory/`, `learnings/`, `skills/`) |
+| `platform` | True for one OS + architecture | Declared in `tools/<name>/tool.json`; payloads under `tools/<name>/bin/<os>-<arch>/` |
+| `host` | True for one device | `hosts/<host-id>/` |
+
+Agents **MUST** apply the scope test before persisting a fact: *would this
+still be true on another device?*
+
+### 10.2 Device identity
+
+- `host-id` **MUST** be `<os>-<arch>-<hostname>`, lowercase, non-alphanumeric characters collapsed to `-`.
+- `os` **MUST** be one of `macos`, `windows`, `linux`, `android`, `ios`, or a sanitized `platform.system()` value when none of those can be established by probing.
+- `arch` **SHOULD** be normalized (`x86_64`/`amd64` → `x64`, `aarch64` → `arm64`).
+- The id **MUST** be computed at runtime and **MUST NOT** be read back from a file inside the guild — a copy arriving on a second device must not inherit the first device's identity.
+- Implementations **SHOULD** honour `AG_HOST_ID` and `AG_PLATFORM` overrides for unstable hostnames and unreliable probes.
+
+### 10.3 `hosts/<host-id>/`
+
+Created by `ag init`. Contains `host.json` (probed device facts), the
+user-owned `host-notes.md` (facts true on this device only), and the
+device-scoped runtime state (`VERSION`, `groom.json`). Implementations **MUST**
+read host state from the current device's directory, **MAY** fall back to the
+pre-3.3 root location, and **MUST NOT** interpret another device's directory as
+their own.
+
+### 10.4 Platform assets
+
+- A tool directory **SHOULD** carry `tool.json` with a `platforms` map keyed by `<os>-<arch>` or `<os>`. Each entry **MAY** declare `exec` (a path relative to the tool directory), `exec_on_path` (a PATH lookup), and `install` (a human-readable install command for that platform).
+- Resolution order: `<os>-<arch>` → `<os>` → `any` → PATH. When nothing resolves, an implementation **MUST** report unavailability together with the install hint for the current platform rather than returning a path that does not exist.
+- Agents **MUST NOT** hardcode paths under `tools/` in shared files; they resolve through the CLI instead.
+- A skill **MAY** declare `platforms` in its manifest or `SKILL.md` frontmatter. Absence means portable.
+
+This is the single sanctioned exception to §2.1's rule that the guild does not
+interpret the convention layer: `tools/<name>/tool.json` is read by the CLI,
+and only that file.

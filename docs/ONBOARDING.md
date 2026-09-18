@@ -370,21 +370,38 @@ Add or update your entry:
 
 ```json
 {
-  "protocol_version": "2.0",
+  "protocol_version": "3.3",
   "agents": {
     "<your-agent-name>": {
       "joined_at": "<ISO 8601 of first join>",
-      "home": "~/.<your-agent-name>/",
-      "last_seen": "<ISO 8601 now>",
       "protocol_version": "<the protocol_version you just joined under, copied from ~/.agent-guild/skills/agent-guild/manifest.json>",
+      "capabilities": ["read_files", "write_files", "..."],
+      "hosts": {
+        "<host-id from `ag platform`>": {
+          "home": "~/.<your-agent-name>/",
+          "skills_root": "<the actual user-extensible skills dir you installed into>",
+          "install_tier": "dir-symlink|symlink|copy|readonly",
+          "install_verified": "skill_list|description_echo|live_invocation|none",
+          "last_seen": "<ISO 8601 now>"
+        }
+      },
+      "home": "~/.<your-agent-name>/",
+      "skills_root": "<same as above — compatibility mirror for older readers>",
       "install_tier": "dir-symlink|symlink|copy|readonly",
-      "install_verified": "skill_list|description_echo|live_invocation|none",
-      "skills_root": "<the actual user-extensible skills dir you installed into>",
-      "capabilities": ["read_files", "write_files", "..."]
+      "last_seen": "<ISO 8601 now>"
     }
   }
 }
 ```
+
+`ag register <agent> <home> <tier> <skills_root>` writes both shapes for you —
+prefer it over hand-editing.
+
+**Why the `hosts` block**: `home`, `skills_root` and the install tier describe
+one *device*, not the agent. A guild directory carried to another machine would
+otherwise look broken there. Run `ag platform` to get this device's `host-id`;
+anything that is only true here (local tool paths, what is installed) belongs
+in `hosts/<host-id>/host-notes.md`. Full rules: `docs/PORTABILITY.md`.
 
 The `protocol_version` field on your entry is what the runtime skill uses to detect major version drift (see `skills/agent-guild/SKILL.md` § Self-check). Don't omit it.
 
@@ -433,12 +450,33 @@ The central directory has a **convention layer** of subdirectories that Agent Gu
 
 3. **When WRITING persistent data**: route it through `~/.agent-guild/skills_data/<your-skill-name>/` — split into `public/` and `private/` subdirectories if the data has mixed sensitivity (see Privacy layering below).
 
+### Two more rules once more than one device is involved (protocol 3.3+)
+
+4. **The guild owns its payloads — links point inward.** Install the real files
+   *into* `~/.agent-guild/`, then link from your runtime (or from a project
+   path) back into the guild. A link pointing from the guild out to
+   `~/projects/foo` is dead on every other device. `ag port --apply` repairs
+   this direction automatically.
+
+5. **Scope every fact before you persist it.** Ask: *would this still be true
+   on another device?*
+
+   | Answer | Where it goes |
+   |---|---|
+   | Yes, anywhere | shared files as usual (`identity/`, `rules/`, `memory/`) |
+   | Only on this OS + arch | declare it: `tools/<name>/tool.json`, or `platforms` in a skill manifest |
+   | Only on this machine | `hosts/<host-id>/host-notes.md` |
+
+   And when you need a tool's path, ask the CLI (`ag tool <name>`) instead of
+   hardcoding one — it answers correctly per device, or tells you the tool is
+   not available here and how to install it. See `docs/PORTABILITY.md`.
+
 ### Concrete examples
 
 | The user said... | What you should do |
 |---|---|
 | "Install the wechat-publisher skill" | `git clone` / `cp -R` it into `~/.agent-guild/skills/wechat-publisher/`, then symlink/copy from there into your runtime — same fallback ladder as in Step 3 |
-| "Set up the Tencent Lexiang MCP" | Place the MCP config / launcher in `~/.agent-guild/mcp/lexiang/`, point your runtime's MCP config at that path |
+| "Set up the Notion MCP server" | Place the MCP config / launcher in `~/.agent-guild/mcp/notion/`, point your runtime's MCP config at that path |
 | "Save my conversation embeddings" | `~/.agent-guild/skills_data/<your-skill>/embeddings/` (or `private/embeddings/` if sensitive) |
 | "Use my soul-archive data" | Read from `~/.agent-guild/skills_data/soul-archive/` if it's there; otherwise fall back to its standalone location |
 | "Add a `claw-state` helper script" | Drop it in `~/.agent-guild/tools/claw-state/`, tell the user to add that path to their `$PATH` |

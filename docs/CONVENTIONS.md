@@ -97,12 +97,13 @@ This is default-on, not optional. The point is: **make it easy for users to back
 
 > **Credentials are NOT skill data.** Login cookies, API keys, OAuth tokens and lock files belong under `~/.agent-guild/connectors/<name>/` (Convention 6), not here — `skills_data/` is for a skill's user-facing data, and mixing secrets into it defeats the whole point of having a clean backup root.
 
-### Default `.gitignore` template
+### Default exclude template for a shared carrier
 
-If the user wants to version-control `~/.agent-guild/` for personal multi-device sync via private git, this is a sensible starting point:
+If the user carries `~/.agent-guild/` between devices — private git, a folder-sync
+tool, a cloud drive — this is a sensible starting point for what to leave behind:
 
 ```gitignore
-# Skill private data — keep out of any git history
+# Skill private data — keep out of any shared history
 skills_data/*/private/
 
 # Per-skill caches that don't need to follow you across devices
@@ -112,16 +113,28 @@ skills_data/*/cache/
 skills_data/*/tmp/
 skills_data/*/.tmp/
 
-# Rebuildable binaries / dependency trees — never sync these
+# Rebuildable binaries / dependency trees — never carry these
 skills_data/*/browsers/
 skills_data/*/node_modules/
 skills_data/*/.venv/
+**/__pycache__/
 **/*.app
 **/*.pid
 
-# Connector credentials — stay local, never in git
+# Recoverable deletions — strictly per device
+.trash/
+
+# Connector credentials — stay local, never in a shared carrier
 connectors/
+
+# OS noise
+.DS_Store
+Thumbs.db
 ```
+
+`hosts/*/` is intentionally **not** excluded: that is how each device
+advertises what it has, and nothing inside it is ever read as belonging to
+another device. See [`PORTABILITY.md`](PORTABILITY.md).
 
 ## Convention 2 — Skill metadata file (optional)
 
@@ -168,6 +181,66 @@ For helper scripts and small utilities the user (or any agent) might run from an
 
 The user MAY add `~/.agent-guild/tools/*/bin/` to `$PATH` if they want shell-level access. This is a user convenience, not a protocol requirement.
 
+### Platform-specific payloads (protocol 3.3+)
+
+A portable script works everywhere; a prebuilt binary works on exactly one OS +
+architecture. Declare the difference instead of leaving other devices to
+discover a dead path:
+
+```
+tools/doxygen/
+├── tool.json                     ← which platforms, and how to install elsewhere
+└── bin/
+    ├── macos-arm64/doxygen
+    └── linux-x64/doxygen
+```
+
+```json
+{
+  "name": "doxygen",
+  "platforms": {
+    "macos-arm64": { "exec": "bin/macos-arm64/doxygen" },
+    "windows-x64": { "install": "winget install -e --id DimitriVanHeesch.Doxygen" },
+    "linux":       { "exec_on_path": "doxygen", "install": "sudo apt install doxygen" }
+  },
+  "any": { "exec_on_path": "doxygen" }
+}
+```
+
+Callers resolve through the CLI, never by hardcoding a path:
+
+```bash
+BIN="$(ag tool doxygen)" || { echo "not available on this device"; exit 0; }
+```
+
+`ag tools` lists every declared tool against the current device, and
+`ag port --apply` generates a missing `tool.json` for the platform it can see.
+Details: [`PORTABILITY.md`](PORTABILITY.md).
+
+## Convention 5b — Links point into the guild, never out of it
+
+The guild **owns** its payloads. A link from inside the guild to an external
+path means the real files exist on one device only, and every other device
+sees a dangling link:
+
+```
+✗ ~/.agent-guild/skills/my-skill  ->  ~/projects/my-skill
+✓ ~/projects/my-skill             ->  ~/.agent-guild/skills/my-skill
+```
+
+Inbound links are the norm — that is exactly how a runtime's skills dir joins
+the shared bus. Intra-guild links use relative targets, so they survive a
+different user name or drive letter. `ag doctor` flags violations;
+`ag port --apply` moves the payload in and links the old path back.
+
+## Convention 5c — Device-scoped facts
+
+Anything true on **one device only** — an absolute local path, what is
+installed here, this machine's quirks — belongs in
+`~/.agent-guild/hosts/<host-id>/host-notes.md`, not in the shared files.
+Shared files (`identity/`, `rules/`, `projects/`, `memory/shared/`) are read by
+every device, so a machine path written there is wrong four times out of five.
+
 ## Convention 6 — Connector credentials
 
 > **Default location for connector credentials: `~/.agent-guild/connectors/<connector-name>/`**
@@ -205,6 +278,8 @@ If you build a skill that wants to read another skill's `skills_data/`, that's b
 | 3 — Shared MCP | `~/.agent-guild/mcp/<name>/` | Agent-agnostic MCP servers | Any agent that wires up to them |
 | 4 — Shared plugins | `~/.agent-guild/plugins/<name>/` | Cross-agent plugins (browser/editor/IDE extensions) | Any compatible host |
 | 5 — Shared CLI tools | `~/.agent-guild/tools/<name>/` | Scripts / utilities runnable from any shell | Anyone — agent or human |
+| 5b — Link direction | — | Guild owns payloads; links point inward, relative inside | `ag doctor` / `ag port` |
+| 5c — Device-scoped facts | `~/.agent-guild/hosts/<host-id>/` | Local paths, install state, this machine's quirks | The device it belongs to |
 | 6 — Connector credentials | `~/.agent-guild/connectors/<name>/` | Login cookies / API keys / lock files (gitignored) | The owning connector |
 | 7 — Default-on, versioned | — | Conventions are default-on; hard protocol changes stay versioned | — |
 

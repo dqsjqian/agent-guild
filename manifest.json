@@ -1,12 +1,13 @@
 {
   "$schema": "https://github.com/dqsjqian/agent-guild/raw/main/spec/manifest.schema.json",
   "name": "agent-guild",
-  "protocol_version": "3.2",
-  "skill_version": "3.7.2",
+  "protocol_version": "3.3",
+  "skill_version": "3.8.0",
   "spec_url": "https://github.com/dqsjqian/agent-guild/blob/main/docs/SPEC.md",
   "onboarding_url": "https://github.com/dqsjqian/agent-guild/blob/main/docs/ONBOARDING.md",
   "skill_url": "https://github.com/dqsjqian/agent-guild/blob/main/SKILL.md",
   "conventions_url": "https://github.com/dqsjqian/agent-guild/blob/main/docs/CONVENTIONS.md",
+  "portability_url": "https://github.com/dqsjqian/agent-guild/blob/main/docs/PORTABILITY.md",
   "scripts": {
     "cli": "scripts/ag.py",
     "package": "scripts/package.sh"
@@ -24,7 +25,8 @@
       "learnings/": "cross-agent self-improvement ledgers: LEARNINGS.md (corrections/gaps/best practices) + ERRORS.md (failures) + FEATURE_REQUESTS.md (missing capabilities) — see docs/LEARNINGS.md (protocol 3.1+)",
       "registry.json": "agent presence + install metadata",
       "ONBOARDING.md": "one-time joining flow",
-      "CONVENTIONS.md": "default-on conventions (this file)"
+      "CONVENTIONS.md": "default-on conventions (this file)",
+      "hosts/<host-id>/": "device-scoped state: host.json (probed os/arch/link capability), host-notes.md (user-owned facts true on THIS device only), VERSION + groom.json (runtime state installed here) — protocol 3.3+"
     },
     "convention_layer": {
       "skills/<name>/": "agent-loadable capabilities (this skill itself + future shared skills); joined runtimes typically point their whole user-extensible skills dir at skills/ via ONE directory link (`ag link-root`), so every entry here is live for all of them at once",
@@ -62,7 +64,10 @@
     "errors_ledger": "learnings/ERRORS.md",
     "feature_requests_ledger": "learnings/FEATURE_REQUESTS.md",
     "learning_entry_id_pattern": "{LRN|ERR|FEAT}-{YYYY-MM-DD}-{XXX}",
-    "inbox_pattern": "handoff/inbox/from-{src}-to-{dst}-{topic}.md"
+    "inbox_pattern": "handoff/inbox/from-{src}-to-{dst}-{topic}.md",
+    "portability": "docs/PORTABILITY.md",
+    "tool_manifest_pattern": "tools/{tool-name}/tool.json",
+    "host_state_pattern": "hosts/{host-id}/{host.json,host-notes.md,VERSION,groom.json}"
   },
   "lifecycle": {
     "_note": "Onboarding (one-time) and runtime (recurring) are deliberately decoupled. Agents read ONBOARDING.md exactly once when joining; afterwards the runtime SKILL.md handles all ongoing operations.",
@@ -104,6 +109,26 @@
       "summary": "Health check across the whole installation: dangling symlinks inside the guild and inside every registered agent's skills_root, missing core protocol files, registry drift (recorded home / skills_root no longer exists), and protocol-version drift (agent joined under an older major version than central). Prints concrete fixes. Read-only — never repairs silently.",
       "cmd": "python3 <skill_dir>/scripts/ag.py doctor",
       "write_mode": "none"
+    },
+    "platform": {
+      "summary": "Identify THIS device: canonical os tag (macos/windows/linux/android/ios), normalized arch, host-id (<os>-<arch>-<hostname>), probed link capability (symlink / junction / copy-only), python, and which other devices have written state into this guild. The host-id is computed at runtime and never read back from a stored file, so a guild copied onto a second device cannot inherit the first device's identity. AG_HOST_ID / AG_PLATFORM override id and platform detection.",
+      "cmd": "python3 <skill_dir>/scripts/ag.py platform [--json]",
+      "write_mode": "read_only"
+    },
+    "tool": {
+      "summary": "Resolve a tool's executable for the current platform and print the path on stdout, so callers never hardcode a path that exists on one device only. Resolution order: tools/<name>/tool.json entry for <os>-<arch>, then <os>, then `any`, then PATH. Exit 3 means the tool is not available on this platform and prints the platform's install hint instead of a dead path.",
+      "cmd": "python3 <skill_dir>/scripts/ag.py tool <name> [--json]",
+      "write_mode": "read_only"
+    },
+    "tools": {
+      "summary": "List every tool under tools/ against the current device: resolved path when available, reason plus install hint when not, and a marker for tools that carry no tool.json yet.",
+      "cmd": "python3 <skill_dir>/scripts/ag.py tools",
+      "write_mode": "read_only"
+    },
+    "port": {
+      "summary": "Portability audit for a guild shared by several devices. Reports device identity, host-scoped state still at the pre-3.3 root, registry entries whose device paths are not scoped per host, links pointing out of the guild (the guild owns its payloads — an outbound link is dead on every other device), absolute intra-guild links, tools missing a tool.json platform declaration, machine paths written into shared text, and single-platform skills that declare no platforms. DEFAULT IS DRY-RUN. `--apply` performs only mechanical, reversible fixes: move host state under hosts/<host-id>/, fold registry device fields into the current host block, internalize outbound links and link the old external path back in, rewrite absolute intra-guild links as relative, and generate a tool.json for the platform it can see. User-written text is never rewritten automatically — it is reported with file:line for a human.",
+      "cmd": "python3 <skill_dir>/scripts/ag.py port [--apply]",
+      "write_mode": "move_and_declare"
     },
     "upgrade": {
       "summary": "Self-check + auto-update. Queries skillhub / github / clawhub (no auth, any ordinary user can run it) for the newest agent-guild version, reports each source, and picks the newest. Default is dry-run (report only); `--apply` downloads the GitHub release zip and installs it — refreshing the skill package + root docs while preserving ALL user data (identity/rules/log/handoff/skills_data/connectors/memory).",
@@ -193,9 +218,12 @@
     "where_to_install_mcp_servers": "If you install or configure an MCP server that should be shared with all joined agents (not bound to a single agent's runtime), MUST place its config under ~/.agent-guild/mcp/<server-name>/.",
     "where_to_drop_plugins": "Shared plugins (e.g. agent-agnostic browser/editor extensions) belong under ~/.agent-guild/plugins/<name>/.",
     "where_to_drop_tools": "Shared CLI scripts / utilities the user might run from any shell session belong under ~/.agent-guild/tools/<name>/.",
+    "how_to_resolve_platform_tools": "Never hardcode a path under tools/ in shared files — a prebuilt binary lives on one platform only. Resolve with `ag tool <name>`: it prints the path for this device, or exits 3 with the install hint for this platform. Declare multi-platform payloads in tools/<name>/tool.json with binaries under tools/<name>/bin/<os>-<arch>/.",
     "where_to_put_connector_credentials": "Connector credentials (login cookies, API keys, OAuth tokens, lock files) MUST go under ~/.agent-guild/connectors/<connector-name>/, NOT skills_data/ — skills_data/ is for skill user data. connectors/ is manually placed, never auto-adopted, and gitignored by default so credentials stay local to the machine.",
     "naming": "Every subdirectory under skills/, skills_data/, and connectors/ MUST use a lowercase-hyphenated name ([a-z0-9-], e.g. qq-mail, agent-browser). No CJK characters, no spaces, no '-skill' suffix — the directory name is the identity, not a display label.",
-    "privacy_layering": "If a skill writes mixed-sensitivity data, split into ~/.agent-guild/skills_data/<skill>/public/ vs .../private/ so users can apply different .gitignore policies (see CONVENTIONS.md)."
+    "privacy_layering": "If a skill writes mixed-sensitivity data, split into ~/.agent-guild/skills_data/<skill>/public/ vs .../private/ so users can apply different .gitignore policies (see CONVENTIONS.md).",
+    "device_scoped_facts": "Before persisting a fact, ask: would this still be true on another device? Yes -> shared files as usual. Only on the same OS+arch -> declare it per platform (tool.json / skill `platforms`). Only on this machine (absolute local paths, what is installed here) -> hosts/<host-id>/host-notes.md. See docs/PORTABILITY.md.",
+    "link_direction": "The guild owns its payloads. A link from inside the guild to an external path is a violation — every other device sees a dangling link. Move the payload into the guild and link the old external path back in (`ag port --apply`). Links that stay inside the guild use relative targets."
   },
   "principles": [
     "Local-first: all data on the user's machine, no servers",
@@ -208,10 +236,20 @@
     "Self-onboarding: agents install themselves, the protocol does not push code to them",
     "Triggerable = done: install is only complete when the runtime can actually invoke the skill",
     "Convention layer is default-on: skills/skills_data/mcp/plugins/tools are the default locations (escape hatch: runtime-forced private paths, noted in registry)",
-    "Naming: lowercase-hyphenated ([a-z0-9-]) for every skills/ skills_data/ connectors/ subdir — no CJK, no spaces, no '-skill' suffix"
+    "Naming: lowercase-hyphenated ([a-z0-9-]) for every skills/ skills_data/ connectors/ subdir — no CJK, no spaces, no '-skill' suffix",
+    "Scope before you store: a fact is shared (true on any device), platform (true for one os+arch), or host (true for this machine only) — protocol 3.3+",
+    "The guild owns its payloads: links point into the guild, never out of it; intra-guild links are relative",
+    "No transport, no network: the directory is made safe to carry between devices, choosing the carrier stays the user's business"
   ],
   "supported_agents": [
     "Any AI agent that can read filesystem and follow natural-language instructions. Symlink support is preferred but not required (copy and readonly fallbacks exist)."
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "platforms": [
+    "macos",
+    "windows",
+    "linux",
+    "android",
+    "ios"
+  ]
 }

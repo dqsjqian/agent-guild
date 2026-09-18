@@ -40,7 +40,7 @@ $null = & {
     $dirs = @(
         'skills\agent-guild\scripts','skills\agent-guild\docs','skills_data','mcp','plugins','tools',
         'memory\shared',
-        'identity','rules','toolchain','projects',
+        'identity','rules','toolchain','projects','hosts',
         'log\daily','log\decisions','log\archive',
         'handoff\inbox','handoff\archive','handoff\shared-state'
     )
@@ -67,9 +67,11 @@ $null = & {
     Download-File "$RepoRawUrl/docs/ONBOARDING.md"                      (Join-Path $Central 'ONBOARDING.md')                          | Out-Null
     Download-File "$RepoRawUrl/docs/CONVENTIONS.md"                     (Join-Path $Central 'CONVENTIONS.md')                         | Out-Null
     Download-File "$RepoRawUrl/docs/SPEC.md"                            (Join-Path $Central 'SPEC.md')                                | Out-Null
+    Download-File "$RepoRawUrl/docs/PORTABILITY.md"                     (Join-Path $Central 'PORTABILITY.md')                         | Out-Null
     Download-File "$RepoRawUrl/docs/ONBOARDING.md"  (Join-Path $Central 'skills\agent-guild\docs\ONBOARDING.md')  | Out-Null
     Download-File "$RepoRawUrl/docs/CONVENTIONS.md" (Join-Path $Central 'skills\agent-guild\docs\CONVENTIONS.md') | Out-Null
     Download-File "$RepoRawUrl/docs/SPEC.md"        (Join-Path $Central 'skills\agent-guild\docs\SPEC.md')        | Out-Null
+    Download-File "$RepoRawUrl/docs/PORTABILITY.md" (Join-Path $Central 'skills\agent-guild\docs\PORTABILITY.md') | Out-Null
     Download-File "$RepoRawUrl/SKILL.md"      (Join-Path $Central 'skills\agent-guild\SKILL.md')      | Out-Null
     Download-File "$RepoRawUrl/manifest.json" (Join-Path $Central 'skills\agent-guild\manifest.json') | Out-Null
     Download-File "$RepoRawUrl/scripts/ag.py" (Join-Path $Central 'skills\agent-guild\scripts\ag.py') | Out-Null

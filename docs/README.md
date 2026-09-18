@@ -1,106 +1,112 @@
 # Agent Guild
 
-> A protocol that lets any sufficiently intelligent AI agent join your shared memory by simply reading one file.
+> 一个协议——让任何足够聪明的 AI agent 只需读一个文件，就能加入你的共享记忆。
 
-**English** | [中文](README_CN.md)
+[English](README_EN.md) | **中文**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Status](https://img.shields.io/badge/status-MVP-blue)]()
-[![Protocol](https://img.shields.io/badge/protocol-v3.2-green)]()
+[![Protocol](https://img.shields.io/badge/protocol-v3.3-green)]()
 
 ---
 
-**You probably switch between multiple AI agents every day** — Claude Code, Cursor, CodeBuddy, WorkBuddy, OpenClaw, Aider, GitHub Copilot Chat… and every one of them is an isolated island. Each one has its own memory of you, none of them know what the other learned. You teach the same preferences over and over.
+**你大概率每天都在多个 AI agent 之间切换** —— Claude Code、Cursor、CodeBuddy、WorkBuddy、OpenClaw、Aider、GitHub Copilot Chat……每一个都是孤岛。每一个都各自有它对你的记忆，谁也不知道别人学到了什么。同样的偏好你要反复教。
 
-**Agent Guild fixes that.** It's a tiny **protocol** — not a framework, not a service, not even a library — that lets multiple AI agents on your machine share a single source of truth via plain Markdown files and Unix symlinks.
+**Agent Guild 终结这件事。** 它是一个**协议**——不是框架、不是服务、甚至不是库——让你机器上的多个 AI agent 通过纯 Markdown 文件 + Unix 软链共享一份记忆真相源。
 
 ---
 
-## The 30-second pitch
+## 30 秒理解
 
 ```
-~/.agent-guild/                ← One central directory on your machine
+~/.agent-guild/                ← 你机器上的中央目录
 │
-│  ─── Protocol layer (mandatory) ───
-├── ONBOARDING.md                ← One-time joining flow for new agents
-├── CONVENTIONS.md               ← Optional, non-normative conventions
-├── identity/                    ← Who you are (profile, routine)
-├── rules/                       ← Hard rules every agent must obey
-├── toolchain/                   ← Tools, paths, configs
-├── projects/                    ← What you're working on
-├── log/daily/                   ← Per-agent daily logs (no write conflicts)
-├── handoff/                     ← Cross-agent inbox + shared state
-├── skills/agent-guild/    ← Runtime skill installed from repo root (SKILL.md + manifest + scripts)
-├── registry.json                ← Which agents have joined
+│  ─── 协议层（强制）───
+├── ONBOARDING.md                ← 新 agent 一次性入会流程
+├── CONVENTIONS.md               ← 可选的、非规范性约定
+├── RETENTION.md                 ← 数据保留策略（groom 防劣化阈值，用户可改）
+├── identity/                    ← 你是谁（profile / 作息）
+├── rules/                       ← 所有 agent 必须遵守的硬规则
+├── toolchain/                   ← 工具 / 路径 / 配置
+├── projects/                    ← 你在做什么
+├── log/daily/                   ← 按 agent 分文件的日志（无写冲突）
+├── handoff/                     ← 跨 agent 收件箱 + 共享状态
+├── hosts/<host-id>/             ← 每台设备自己的状态（本机路径、安装情况）
+├── learnings/                   ← 跨 agent 学习台账（纠正/错误/特性请求）
+├── skills/agent-guild/    ← 从仓库根安装的 runtime skill（SKILL.md + manifest + scripts）
+├── registry.json                ← 哪些 agent 加入了
 │
-│  ─── Convention layer (optional, recommended) ───
-├── skills_data/<skill>/         ← Per-skill persistent data (one backup root for all)
-├── mcp/<server>/                ← Shared MCP server configs
-├── plugins/<name>/              ← Shared plugins
-└── tools/<name>/                ← Shared CLI scripts/utilities
+│  ─── 约定层（可选，推荐）───
+├── skills_data/<skill>/         ← 各 skill 自己的持久化数据（一个备份根管所有）
+├── mcp/<server>/                ← 共享 MCP server 配置
+├── plugins/<name>/              ← 共享插件
+└── tools/<name>/                ← 共享 CLI 脚本/工具（+ tool.json 声明各平台）
 ```
 
-Every joined agent points its whole skills dir at the guild with ONE directory link:
+每个加入的 agent 把自己的 skills 目录用**一条目录级软链**指向协会：
 
 ```bash
-~/.<your-agent>/skills → ~/.agent-guild/skills/
+~/.<你的-agent>/skills → ~/.agent-guild/skills/
 ```
 
-That's it. **No daemon. No server. No npm install. No third-party runtime. Pure filesystem.**
+就这。**没有 daemon。没有服务器。没有 npm install。没有第三方运行时。纯文件系统。**
 
 ---
 
-## Why this exists (and why it's different)
+## 为什么需要它（以及它跟别的方案有啥不同）
 
-| Existing solution | What it does | The catch |
+| 已有方案 | 它做什么 | 死穴 |
 |---|---|---|
-| ChatGPT Memory | Auto-remembers facts about you | Locked inside OpenAI |
-| Claude Projects | Project-scoped context | Anthropic only |
-| MemGPT / Letta | Long-term memory inside one agent | Doesn't span agents |
-| Mem0 | Cross-agent memory service | Needs server, REST API, vendor lock |
-| MCP | Tool/resource protocol | Not about memory |
-| **Agent Guild** | **Cross-vendor, local-first, plaintext, zero-deps** | **Requires the agent to be smart enough to read a file** |
+| ChatGPT Memory | 自动记住关于你的事实 | 锁死在 OpenAI 生态 |
+| Claude Projects | 项目级上下文 | Anthropic 独享 |
+| MemGPT / Letta | 单 agent 内部长期记忆 | 不跨 agent |
+| Mem0 | 跨 agent 的记忆服务 | 需要服务化部署、REST API、绑死供应商 |
+| MCP | 工具/资源协议 | 不是记忆方案 |
+| **Agent Guild** | **跨厂商、本地优先、纯文本、零依赖** | **要求 agent 智力够读懂一份文件** |
 
-The differentiator: **we don't write adapters for each agent**. We write a single `SKILL.md` that any sufficiently intelligent LLM can read and self-onboard from. Agents that can't follow plain English instructions… don't get to join. That's the design.
-
----
-
-## How a user makes any AI agent join
-
-Tell the agent, in any language, any phrasing:
-
-> "Read `~/.agent-guild/ONBOARDING.md` and join the Agent Guild system."
-
-That's the entire user-side workflow. No CLI to install, no configs to edit. The agent reads the file, follows the joining flow inside, and reports back.
-
-If the agent can't figure it out, **the agent isn't smart enough for your workflow** — and you'll know that, too. It's a built-in capability test.
+差异化的关键：**我们不为每个 agent 写适配器**。我们写**一份** `SKILL.md`，任何足够聪明的 LLM 都能读懂并自我接入。读不懂的 agent……不配加入。这是设计本身。
 
 ---
 
-## What the protocol actually requires of a joined agent
+## 用户怎么让任何 AI agent 加入
 
-The protocol cleanly separates **one-time joining** from **ongoing capabilities**:
+对 agent 说一句（任何语言、任何措辞）：
 
-- **`ONBOARDING.md`** (one-time): discover your runtime's user-extensible skills directory, consolidate it into ONE directory link to the guild (`ag link-root`; fallbacks: per-skill symlink → copy → readonly), run a closed-loop trigger test to prove the runtime can actually invoke it, register in `registry.json`.
-- **`SKILL.md`** (recurring): read shared identity / rules / current focus; check inbox / send messages; append daily logs; refresh `last_seen`. This is the runtime capability the joined agent carries forward.
+> "请读 `~/.agent-guild/ONBOARDING.md` 加入这个体系。"
 
-See [`ONBOARDING.md`](ONBOARDING.md) for the joining flow.
-See [`SKILL.md`](../SKILL.md) for the runtime capability spec.
-See [`SPEC.md`](SPEC.md) for the full normative specification.
-See [`CONVENTIONS.md`](CONVENTIONS.md) for optional, non-normative conventions (e.g. recommended skill data location at `~/.agent-guild/skills_data/`).
-See [`manifest.json`](../manifest.json) for the machine-readable spec.
+就这一句话——这就是用户侧全部工作流。不需要装 CLI，不需要改配置。Agent 自己读这个文件，按里面的入会流程完成接入并报告。
+
+如果某个 agent 搞不定这件事，**说明这个 agent 不够聪明，不配做你的工作伙伴** —— 你也借此知道了。这是内置的能力测试。
 
 ---
 
-## Single source of truth — automatic protocol updates
+## 协议要求加入的 agent 做什么
 
-Each joined agent's `~/.<agent>/skills/` is **one directory symlink** to the central `~/.agent-guild/skills/`. When this project ships a protocol update, you update the central dir; **every agent on the user's machine sees the new version on its next session start**. No push notifications, no version checks, no hash comparison. Better still: a new skill any agent installs into the guild appears in every consolidated runtime instantly — no per-skill relinking, ever. (Fallback tier: per-skill symlinks.)
+协议显式区分**一次性入会** vs **持续运行能力**：
 
-User-owned files (`identity/`, `rules/`, `toolchain/`, etc.) are **never overwritten by upstream** — they live next to but outside the symlinked `skills/`.
+- **`ONBOARDING.md`**（一次性）：发现自己 runtime 的"用户可扩展 skill 目录"→ 收敛为指向协会的**一条目录级软链**（`ag link-root`；降级：逐 skill 软链 → copy → readonly）→ 闭环触发自检证明真的能调 → 在 `registry.json` 登记
+- **`SKILL.md`**（每次按需触发）：读共享身份/规则/当前焦点；查收件箱/发消息；写当日日志；刷新 `last_seen`。这是加入后 agent 一直带着的运行时能力
+
+详见：
+- [`ONBOARDING.md`](ONBOARDING.md) —— 一次性入会流程
+- [`SKILL.md`](../SKILL.md) —— 加入后的运行时能力
+- [`SPEC.md`](SPEC.md) —— 完整协议规范
+- [`CONVENTIONS.md`](CONVENTIONS.md) —— 非规范性的可选约定（如推荐的 skill 数据位置 `~/.agent-guild/skills_data/`）
+- [`manifest.json`](../manifest.json) —— 机器可读
 
 ---
 
-## Install (for users)
+## 单一真相源 + 自动协议升级 + 自动防劣化
+
+每个加入 agent 的 `~/.<agent>/skills/` 是**一条目录级软链**，直接指向中央 `~/.agent-guild/skills/`。当本项目发布协议升级，你只更新中央目录，**用户机器上每个 agent 下次会话启动就看到新版本**。零推送、零版本检查、零 hash 比对——而且任何 agent 往协会装一个新 skill，所有已收敛的 runtime **立即可见**，永远不需要再补软链。文件系统语义就这么干净利落。（降级 tier：逐 skill 软链。）
+
+用户自己的内容（`identity/` `rules/` `toolchain/` 等）**从不会被上游覆盖** —— 它们存在于软链外的同级目录，跟协议骨架物理隔离。
+
+共享记忆只增不减迟早劣化：current-focus 变成一堵墙、日志无限堆积、审计滚成巨石。协议 3.2 内置 **groom 数据卫生**：skill 正常触发（bootstrap）后自动检测并整理——过期日志/焦点块/已解决的台账条目归档、审计轮转、过期消息进废纸篓。**永不硬删**（一切进 archive 或可恢复的 `.trash/`）、**策略可调**（`RETENTION.md`）、未读消息和手写内容永远只报告不动。也可手动 `ag groom --dry-run` 预览。
+
+---
+
+## 安装（用户视角）
 
 ### macOS / Linux / WSL / Git Bash
 
@@ -108,71 +114,108 @@ User-owned files (`identity/`, `rules/`, `toolchain/`, etc.) are **never overwri
 curl -fsSL https://raw.githubusercontent.com/dqsjqian/agent-guild/main/scripts/install.sh | bash
 ```
 
-### Windows (PowerShell)
+### Windows（PowerShell）
 
 ```powershell
 iwr -useb https://raw.githubusercontent.com/dqsjqian/agent-guild/main/scripts/install.ps1 | iex
 ```
 
-The installer does exactly **one** thing: bootstrap the central directory at `~/.agent-guild/` (or `%USERPROFILE%\.agent-guild\`) with seed files, then print a bilingual one-liner you can paste into any AI agent. **It does not touch any agent's home directory.** Agents install themselves — that's the protocol.
+安装器只做**一件事**：在 `~/.agent-guild/`（Windows 上是 `%USERPROFILE%\.agent-guild\`）建中央目录 + seed 模板 + 末尾打印一条双语口令让你复制给 agent。**它不会动任何 agent 的 home 目录。** Agent 自己负责接入——这就是协议。
 
-### Manual install
+### 手动安装
 
 ```bash
 git clone https://github.com/dqsjqian/agent-guild ~/.agent-guild
 ```
 
-Then tell your agent:
+然后对你的 agent 说：
 
-> "Read `~/.agent-guild/ONBOARDING.md` and join Agent Guild."
+> "请阅读 `~/.agent-guild/ONBOARDING.md` 加入 Agent Guild。"
 
-The agent will figure out how to integrate with itself (one directory link, per-skill links, copy, or read-only fallback — see ONBOARDING.md).
-
-(Windows users: replace `~` with `$HOME` in PowerShell, and use `New-Item -ItemType SymbolicLink` instead of `ln -s`.)
-
-Then talk to your agent.
+Agent 会自己想办法接入（目录级软链、逐 skill 软链、拷贝、或者只读 fallback——具体见 ONBOARDING.md）。
 
 ---
 
-## Platform support
+## 平台支持
 
-| OS / Shell | Status |
+| 系统 / Shell | 状态 |
 |---|---|
-| macOS | ✅ first-class |
-| Linux | ✅ first-class (any POSIX shell) |
-| Windows + PowerShell 5.1+ | ✅ first-class (Dev Mode or Admin required for symlinks) |
-| Windows + WSL / Git Bash | ✅ works (set `MSYS=winsymlinks:nativestrict` for Git Bash) |
-| Windows + cmd.exe | ❌ not supported (use PowerShell) |
+| macOS | ✅ 一类支持 |
+| Linux | ✅ 一类支持（任何 POSIX shell） |
+| Windows + PowerShell 5.1+ | ✅ 一类支持（开发者模式或管理员权限；否则自动降级用目录 junction） |
+| Windows + WSL / Git Bash | ✅ 可用（Git Bash 需先设 `MSYS=winsymlinks:nativestrict`） |
+| 安卓（Termux）/ iOS shell | ✅ 识别为独立平台标签；不属于本平台的资产会明确报"本机不可用"并给安装指引 |
+| Windows + cmd.exe | ❌ 不支持（请用 PowerShell） |
+
+`ag platform` 会打印本机被识别成什么，包括**能不能建软链**——建不了也能加入，只是走 copy 档。
+
+### 升级（已经装过）
+
+```bash
+cd ~/.agent-guild && git pull   # （如果通过 git clone 装的）
+# 或重新跑：
+curl -fsSL https://raw.githubusercontent.com/dqsjqian/agent-guild/main/scripts/install.sh | bash
+```
+
+升级**永远不会**覆盖你的 `identity/` `rules/` `toolchain/`。只会更新协议骨架（`skills/`）。
 
 ---
 
-## Project status & philosophy
+## 多设备 / 备份
 
-**Phase 1 (done): Protocol + reference content.** Directory skeleton, `SKILL.md`, `manifest.json`, cross-platform installers. The README is the product.
+整个 `~/.agent-guild/` 就是一个普通目录，可以用你习惯的任何方式搬到另一台机器：
+rsync、私有 git 仓、文件同步工具、云盘、U 盘。**协会自己不做同步**，不联网、
+没有 sync 命令——搬运方式由你定。它负责的是搬过去之后真正会出问题的那部分：
+**每台设备都分得清哪条数据对自己成立。**
 
-**Phase 2 (done): Single-file CLI** (`ag`) — `init / adopt / bootstrap / doctor / upgrade / learn / review / resolve / groom / status / register / log / focus / send / audit / prune`. Pure Python stdlib, zero dependencies, Windows / macOS / Linux.
+| 作用域 | 判定 | 放哪 |
+|---|---|---|
+| `shared` | 换设备照样成立 | 原样：`identity/` `rules/` `memory/` `learnings/` `skills/` |
+| `platform` | 只对某个 OS+架构成立 | `tools/<name>/tool.json`，二进制放 `bin/<os>-<arch>/` |
+| `host` | 只对本机成立 | `hosts/<host-id>/`（本机绝对路径、装了什么、本机笔记） |
 
-**Phase 3 (in progress): Adapters directory.** Community-contributed integration guides for specific agents.
+```bash
+ag platform            # 我在哪台设备：os / 架构 / host-id / 软链能力
+ag tool doxygen        # 本平台的可执行路径；没有则退出码 3 + 该平台安装指引
+ag port                # 便携性体检；--apply 只做机械修复
+```
 
-We are deliberately **not** building:
-- a daemon
-- a Python/Node package on pip/npm
-- a CRDT sync engine
-- a cloud service
-- a chat UI
+换新设备的流程：目录搬过去 → `ag init <agent>`（自动认领新设备）→ `ag port`
+看差异 → 按提示装缺的平台工具。老设备的数据一个字节都不用改。
 
-This project is a **convention**, not software. Convention beats configuration. Filesystem beats database. Symlinks beat sync logic.
+**注意不要把它推到公开仓库**——里面是你的私人记忆。完整规则见
+[`PORTABILITY.md`](PORTABILITY.md)。
+
+---
+
+## 项目状态 & 设计哲学
+
+**Phase 1（已完成）：协议 + 参考内容。** 目录骨架、`SKILL.md`、`manifest.json`、跨平台安装脚本。README 才是产品。
+
+**Phase 2（已完成）：单文件 Python CLI**（`ag` 命令），子命令 `init / adopt / link-root / bootstrap / doctor / platform / tool / tools / port / upgrade / learn / review / resolve / groom / status / register / log / focus / send / audit / prune`。stdlib only，零第三方依赖，Windows / macOS / Linux 通用。
+
+**Phase 3（进行中）：Adapters 目录。** 社区贡献各 agent 的接入指南。
+
+我们**坚决不会**做：
+
+- daemon（守护进程）
+- pip / npm 上的包
+- CRDT 同步引擎
+- 云服务
+- 聊天界面
+
+这个项目是一份**约定**，不是软件。约定胜过配置。文件系统胜过数据库。软链胜过同步逻辑。
 
 ---
 
 ## License
 
-MIT. See [LICENSE](../LICENSE).
+MIT。详见 [LICENSE](../LICENSE)。
 
-## Author
+## 作者
 
-[@dqsjqian](https://github.com/dqsjqian) · also creator of [soul-archive](https://github.com/dqsjqian/soul-archive) and [ai-eight-creed](https://github.com/dqsjqian/ai-eight-creed).
+[@dqsjqian](https://github.com/dqsjqian) · 同时是 [soul-archive](https://github.com/dqsjqian/soul-archive)（数字人格存档）和 [ai-eight-creed](https://github.com/dqsjqian/ai-eight-creed)（AI 八耻八荣）的作者。
 
 ---
 
-> *Make your AI agents finally stop forgetting each other.*
+> *让你的 AI agent 们终于停止互相不认识。*

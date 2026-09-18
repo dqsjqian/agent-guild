@@ -12,19 +12,29 @@ description: |
   · 当前状态："现在在做什么" "当前任务/焦点/进度" "current focus"
   · 数据卫生："整理一下协会" "清理过期数据" "协会瘦身/归档" "防止数据劣化"
     "groom" "cleanup" "archive old data"
+  · 跨设备："换了台电脑" "另一台机器" "Windows/Linux 上用不了" "这台设备"
+    "这个工具在哪" "cross-device" "another machine" "which platform"
   · 加入："加入协会" "初始化协会" "join agent guild" "install this skill"
 
   能力：读/写共享身份、规则、焦点；收件箱交接；每日日志；跨 agent 学习台账
   （错误/纠正/特性请求 → 复发追踪 → 晋升规则或萃取共享 skill）；数据卫生
   （bootstrap 后自动 groom：过期日志/焦点/台账归档、审计轮转，防数据劣化）；
+  跨设备可移植（三层作用域 shared/platform/host：认得出自己在哪台设备、
+  哪些资产不属于本平台，`ag platform` / `ag tool <name>` / `ag port`）；
   `ag init/adopt/link-root/bootstrap/doctor/groom/upgrade/learn/review/resolve`
   （link-root 把 runtime 整个 skills 目录收敛成指向协会的一条目录级软链；
   upgrade 自动从 skillhub/github/clawhub 查最新版并更新）。
   未加入？先跑 docs/ONBOARDING.md。
 slug: agent-guild
 displayName: 智能体协会 Agent Guild
-protocol_version: "3.2"
-version: "3.7.2"
+display_name: 智能体协会 Agent Guild
+display_name_en: Agent Guild
+description_zh: 跨 agent 共享记忆协议，本机多个 AI 共用一份身份/规则/记忆，可跨设备搬运
+description_en: Cross-agent shared memory protocol — one identity, rules and memory for every AI on your devices
+author: dqsjqian
+protocol_version: "3.3"
+version: "3.8.0"
+platforms: ["macos", "windows", "linux", "android", "ios"]
 license: MIT
 homepage: https://github.com/dqsjqian/agent-guild
 repository: https://github.com/dqsjqian/agent-guild
@@ -36,6 +46,10 @@ agent_created: true
 > Local-first cross-agent shared memory. Join once, share identity/rules/focus
 > across every agent on this machine. Data lives at `~/.agent-guild/`
 > (plaintext, yours, never uploaded).
+>
+> The directory is also safe to carry between devices: facts are scoped as
+> shared / platform / host, so a second machine reads what applies to it and
+> recognises the rest as belonging elsewhere (Capability 10).
 
 `SKILL_DIR` below means the directory containing this file. CLI entry point:
 `python3 <SKILL_DIR>/scripts/ag.py` (referred to as `ag`). Requires Python 3.9+
@@ -78,6 +92,9 @@ python3 <SKILL_DIR>/scripts/ag.py bootstrap <your-agent-name>
 
 一次读全：用户画像 → 日程 → 最高优先级戒律 → 在做的项目 → 各 agent 当前焦点 → 你的未读收件箱。
 
+输出开头会先告诉你**你在哪台设备上**（host-id / 平台 / 软链能力 / 本机专属笔记）——
+平台或机器相关的东西都挂在这个身份上，别拿别的设备的路径当本机的用。
+
 | 文件 | 内容 |
 |---|---|
 | `identity/profile.md` | 用户是谁 |
@@ -85,6 +102,7 @@ python3 <SKILL_DIR>/scripts/ag.py bootstrap <your-agent-name>
 | `rules/universal.md` | 最高优先级戒律 |
 | `projects/active.md` | 用户当前在做什么 |
 | `handoff/shared-state/current-focus.md` | 各 agent 当前焦点 |
+| `hosts/<host-id>/host-notes.md` | 只在本设备成立的事实（本机路径、本机装了什么） |
 
 读到什么就按什么做。**没读就动手 = 违反协议。** 之后按需再读 `toolchain/*.md`、其他 `rules/*.md`。
 
@@ -155,6 +173,11 @@ AG="python3 <SKILL_DIR>/scripts/ag.py"
 
 $AG init <agent>                    # bootstrap the guild (idempotent)
 $AG bootstrap <agent>               # read ALL shared context in one shot
+$AG platform                        # which device am I on? os/arch/host-id/links
+$AG tool <name>                     # resolve a tool's path HERE (exit 3 = not
+                                    #   available on this platform + how to install)
+$AG tools                           # declared tools x availability on this device
+$AG port [--apply]                  # portability audit for multi-device guilds
 $AG adopt <agent>                   # dry-run: what of mine belongs in the guild?
 $AG adopt <agent> --apply           # move it in + symlink back
 $AG doctor                          # dangling links / stale paths / drift
@@ -271,6 +294,44 @@ audit 越滚越大、resolved 台账条目永远躺在 live 文件里。groom �
 - **策略可调**：所有阈值在 `~/.agent-guild/RETENTION.md`（用户文件，升级不覆盖）。
 - **可审计**：每次 groom 写 `log/audit.jsonl` + `.groom.json` 状态。
 
+## Capability 10 — Cross-device portability (protocol 3.3+)
+
+一份协会目录可能被搬到好几台设备上（Win / mac / Linux / 安卓 / iOS）。
+协会**自己不做同步**，它只保证：被任何载体搬过去之后，每台设备都分得清
+"这条对我成立 / 这条不属于我"。三层作用域：
+
+| 作用域 | 判定 | 放哪 |
+|---|---|---|
+| **shared** | 换设备照样成立 | 原样：`identity/` `rules/` `projects/` `memory/` `learnings/` `skills/` |
+| **platform** | 只对某个 OS+架构成立 | `tools/<name>/tool.json` 声明各平台，二进制放 `tools/<name>/bin/<os>-<arch>/` |
+| **host** | 只对本机成立 | `hosts/<host-id>/`：`host.json`、`host-notes.md`、`VERSION`、`groom.json` |
+
+判定口诀：**这条信息换台设备还成立吗？** 成立 → shared；同 OS 才成立 → platform；只有本机成立 → host。
+
+### 四条硬规矩
+
+1. **取工具路径只走 `ag tool <name>`**，不要写死 `~/.agent-guild/tools/...` ——
+   那个路径在别的平台是死的。exit 3 表示"本平台没有"，顺带给安装指引。
+2. **共享文件里不写机器绝对路径**（`/Users/xxx/`、`C:\Users\xxx\`）。
+   本机专属路径写 `hosts/<host-id>/host-notes.md`。
+3. **协会是本体，软链只许进不许出。** 协会内的软链指向外部路径 = 违规：
+   其他设备只能看到断链。把 payload 搬进协会，让外部路径软链回来
+   （`ag port --apply` 自动做这件事）。协会内部的软链用相对路径。
+4. **平台专属 skill 要声明**：manifest 里写 `"platforms": ["windows"]` 之类；
+   不写 = 全平台可用。
+
+### 例行动作
+
+```bash
+$AG platform          # 我在哪台设备、能不能建软链
+$AG port              # 便携性体检（DRY-RUN，只报告）
+$AG port --apply      # 只做机械修复：host 状态归位、registry 按设备分块、
+                      # 出站软链内化、绝对软链转相对、工具补平台声明
+```
+
+用户换新设备时：把目录搬过去 → `ag init <agent>`（自动认领新 host-id）→
+`ag port` 看差异 → 按提示装缺的平台工具。老设备的数据一个字节都不用改。
+
 ## Failure modes
 
 - Some files missing → read what exists, note the rest, don't block.
@@ -283,5 +344,6 @@ audit 越滚越大、resolved 台账条目永远躺在 live 文件里。groom �
 - Onboarding (one-time): `docs/ONBOARDING.md`
 - Conventions: `docs/CONVENTIONS.md`
 - Learning ledger (self-improvement): `docs/LEARNINGS.md`
+- Cross-device portability: `docs/PORTABILITY.md`
 - Repository: https://github.com/dqsjqian/agent-guild
 - License: MIT

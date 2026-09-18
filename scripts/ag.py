@@ -22,6 +22,13 @@ Commands:
   adopt --apply [agent]   Move assets into the guild + link back
   bootstrap               Print all shared context (identity/rules/projects/focus)
   doctor                  Health check: broken links, stale paths, version drift
+  platform                Identify THIS device: os / arch / host-id / link support
+  tool <name>             Resolve a tool's executable for this platform (prints
+                          the path; exit 3 + install hint when unavailable)
+  tools                   List declared tools x availability on this device
+  port                    Portability audit for multi-device guilds (DRY-RUN)
+  port --apply            Move host-scoped state under hosts/<host-id>/,
+                          fold registry paths per device, declare tool platforms
   upgrade                 Check 3 platforms for a newer skill version (dry-run)
   upgrade --apply         Download + install the latest version, keep user data
   status                  List registered agents + last_seen
@@ -44,6 +51,8 @@ Env:
   AGENT_GUILD_DIR   override central dir (default ~/.agent-guild)
   AG_AGENT          your agent name (used by `send`, and as default for
                     init/adopt when no agent argument is given)
+  AG_HOST_ID        override this device's id (default <os>-<arch>-<hostname>)
+  AG_PLATFORM       override platform detection as <os>-<arch> (e.g. linux-x64)
 
 Exit codes: 0 ok, 1 error, 2 usage.
 """
@@ -53,6 +62,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import platform
 import re
 import shutil
 import stat
@@ -75,8 +85,184 @@ INBOX = CENTRAL / "handoff" / "inbox"
 FOCUS = CENTRAL / "handoff" / "shared-state" / "current-focus.md"
 VERSION = CENTRAL / "VERSION"
 LEARNINGS = CENTRAL / "learnings"
+HOSTS = CENTRAL / "hosts"
+TOOLS = CENTRAL / "tools"
 
-PROTOCOL_VERSION = "3.2"
+PROTOCOL_VERSION = "3.3"
+
+# ------------------------------------------------------------ portability ---
+
+# A guild directory is frequently placed on a file-level carrier shared by
+# several devices (any folder-sync tool, cloud drive, or VCS checkout): a
+# laptop, a desktop running another OS, a phone. Protocol 3.3 therefore gives
+# every stored fact a SCOPE, so a second device can tell "not mine" apart from
+# "missing":
+#
+#   shared    true on every device       -> stays exactly where it always was
+#   platform  true for one OS+arch pair  -> declared per platform tag
+#   host      true for this device only  -> namespaced under hosts/<host-id>/
+#
+# Rule of thumb for any agent: "would this still be true on another device?"
+# Yes -> shared. Only on the same OS -> platform. Only here -> host.
+#
+# Link-direction invariant: the guild OWNS its payloads. Links pointing from
+# the guild to an external path break on every other device, so they are a
+# violation; links pointing INTO the guild (runtime skills dirs, project
+# checkouts) are the normal, portable direction.
+
+TOOL_MANIFEST = "tool.json"
+HOST_NOTES = "host-notes.md"
+
+# Canonical OS tags. Anything unrecognised degrades to a sanitized
+# platform.system() value instead of being guessed into the wrong family.
+OS_TAGS = ("macos", "windows", "linux", "android", "ios")
+
+_ARCH_ALIASES = {
+    "x86_64": "x64", "amd64": "x64", "x64": "x64",
+    "aarch64": "arm64", "arm64": "arm64", "armv8l": "arm64",
+    "i386": "x86", "i686": "x86", "x86": "x86",
+    "armv7l": "arm",
+}
+
+# Host-scoped state files: written under hosts/<host-id>/, with the pre-3.3
+# root location kept as a read-only fallback until `ag port --apply` moves it.
+_LEGACY_STATE = {"VERSION": "VERSION", "groom.json": ".groom.json"}
+
+# Registry fields whose value is a property of the DEVICE, not of the agent.
+HOST_SCOPED_FIELDS = ("home", "skills_root", "install_tier",
+                      "install_verified", "last_seen")
+
+
+def _slug(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", str(text).lower()).strip("-")
+
+
+def _platform_override() -> Tuple[str, str]:
+    """`AG_PLATFORM=<os>-<arch>` overrides detection.
+
+    Two honest uses: a runtime whose probes are wrong (exotic shell, emulated
+    arch), and dry-running another device's resolution before carrying the
+    guild there.
+    """
+    raw = _slug(os.environ.get("AG_PLATFORM", ""))
+    if not raw:
+        return ("", "")
+    parts = raw.split("-")
+    return (parts[0], "-".join(parts[1:]) if len(parts) > 1 else "")
+
+
+def detect_os() -> str:
+    """Canonical OS tag for this device — probes only, never guesses."""
+    forced = _platform_override()[0]
+    if forced:
+        return forced
+    if os.name == "nt" or sys.platform.startswith("win"):
+        return "windows"
+    if sys.platform == "ios" or platform.system() == "iOS":
+        return "ios"
+    if sys.platform == "android" or platform.system() == "Android":
+        return "android"
+    if sys.platform == "darwin":
+        if (platform.machine().startswith(("iPhone", "iPad", "iPod"))
+                or Path("/var/mobile").is_dir()):
+            return "ios"
+        return "macos"
+    if sys.platform.startswith("linux"):
+        # Termux / Android userland looks like Linux to sys.platform
+        if ("com.termux" in os.environ.get("PREFIX", "")
+                or os.environ.get("ANDROID_ROOT")
+                or Path("/system/build.prop").is_file()):
+            return "android"
+        return "linux"
+    return _slug(platform.system()) or "unknown"
+
+
+def detect_arch() -> str:
+    forced = _platform_override()[1]
+    if forced:
+        return forced
+    m = platform.machine().lower()
+    return _ARCH_ALIASES.get(m, _slug(m) or "unknown")
+
+
+def platform_tag() -> str:
+    """`<os>-<arch>` — the unit of "the same prebuilt binary runs here"."""
+    return f"{detect_os()}-{detect_arch()}"
+
+
+def host_id() -> str:
+    """Stable id of THIS device: `<os>-<arch>-<hostname>`.
+
+    Computed at runtime and never read back from a stored file — a synced copy
+    of the guild landing on a second device must not inherit the first
+    device's identity. `AG_HOST_ID` overrides it (hostname changed, or two
+    devices deliberately sharing one id).
+    """
+    override = os.environ.get("AG_HOST_ID", "").strip()
+    if override:
+        return _slug(override)
+    node = _slug(platform.node().split(".")[0]) or "host"
+    return f"{platform_tag()}-{node}"
+
+
+def host_dir(create: bool = False) -> Path:
+    d = HOSTS / host_id()
+    if create:
+        d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def known_hosts() -> list:
+    """Device ids that have ever written state into this guild."""
+    if not HOSTS.is_dir():
+        return []
+    try:
+        return sorted(p.name for p in HOSTS.iterdir() if p.is_dir())
+    except OSError:
+        return []
+
+
+def host_state(name: str) -> Path:
+    """Read path of a host-scoped state file: new location first, pre-3.3 root
+    location as fallback so an un-migrated guild keeps working."""
+    new = host_dir() / name
+    if new.exists():
+        return new
+    legacy = CENTRAL / _LEGACY_STATE.get(name, name)
+    return legacy if legacy.exists() else new
+
+
+def link_capability() -> str:
+    """What kind of link this device can actually create — probed, not
+    assumed (Windows without developer mode, some Android/iOS shells and
+    exFAT/FAT volumes cannot symlink at all)."""
+    probe = None
+    try:
+        probe = Path(tempfile.mkdtemp(prefix="ag-probe-"))
+        target = probe / "t"
+        target.mkdir()
+        ok, how = make_link(probe / "l", target)
+        return how if ok else "copy-only"
+    except OSError:
+        return "copy-only"
+    finally:
+        if probe:
+            shutil.rmtree(probe, ignore_errors=True)
+
+
+def platform_facts() -> dict:
+    return {
+        "host_id": host_id(),
+        "platform": platform_tag(),
+        "os": detect_os(),
+        "arch": detect_arch(),
+        "python": sys.executable or "python3",
+        "python_version": platform.python_version(),
+        "links": link_capability(),
+        "central": str(CENTRAL),
+        "known_hosts": known_hosts(),
+    }
+
 
 # Learning ledger: kind -> (file, ID prefix). Protocol 3.1+.
 LEDGERS = {
@@ -104,7 +290,17 @@ VERSION_SOURCES = [
 # re-read on every run. Core invariant: groom NEVER hard-deletes — expired
 # data moves to archive dirs or the recoverable trash.
 RETENTION = CENTRAL / "RETENTION.md"
-GROOM_STATE = CENTRAL / ".groom.json"
+GROOM_STATE = CENTRAL / ".groom.json"  # pre-3.3 location, read-only fallback
+
+
+def groom_state_read() -> Path:
+    """Groom bookkeeping is per device: one machine's grooming says nothing
+    about another's."""
+    return host_state("groom.json")
+
+
+def groom_state_write() -> Path:
+    return host_dir(create=True) / "groom.json"
 
 RETENTION_DEFAULTS = {
     "daily_log_days": 90,
@@ -132,6 +328,7 @@ SKELETON = [
     "handoff/shared-state/archive",
     "log/daily", "log/decisions", "log/archive", "learnings", "learnings/archive",
     "skills", "skills_data", "mcp", "plugins", "tools", "memory", "connectors",
+    "hosts",
 ]
 
 PLACEHOLDERS = {
@@ -308,6 +505,65 @@ def load_registry() -> dict:
 def save_registry(data: dict, agent: str, action: str) -> None:
     atomic_write_json(REGISTRY, data)
     audit(action, {"agent": agent, "file": "registry.json"})
+
+
+# -- registry, per device (protocol 3.3+) ------------------------------------
+# An agent entry mixes two scopes: what the agent IS (name, capabilities, the
+# protocol version it joined under) is shared, while where it lives (home,
+# skills_root, install tier, last_seen) is a fact about one device. The device
+# facts live in `agents.<name>.hosts.<host-id>`; the flat fields are kept as a
+# compat mirror so a pre-3.3 client on the same machine still reads them.
+
+def host_block(entry: dict, hid: str = "") -> dict:
+    hosts = entry.get("hosts")
+    if isinstance(hosts, dict):
+        block = hosts.get(hid or host_id())
+        if isinstance(block, dict):
+            return block
+    return {}
+
+
+def entry_view(entry: dict) -> dict:
+    """Effective agent fields for THIS device.
+
+    A pre-3.3 entry has flat fields only; those describe the machine they were
+    written on, so treating them as this device's data is the correct reading
+    until `ag port --apply` folds them into a host block.
+    """
+    view = {k: v for k, v in entry.items() if k != "hosts"}
+    view.update({k: v for k, v in host_block(entry).items() if v})
+    return view
+
+
+def registered_here(entry: dict) -> bool:
+    """False only when the entry has host blocks and none of them is ours —
+    i.e. the agent is installed on other devices, not on this one."""
+    hosts = entry.get("hosts")
+    if not isinstance(hosts, dict) or not hosts:
+        return True
+    return host_id() in hosts
+
+
+def other_hosts(entry: dict) -> list:
+    hosts = entry.get("hosts")
+    if not isinstance(hosts, dict):
+        return []
+    return sorted(h for h in hosts if h != host_id())
+
+
+def fold_entry_to_host(entry: dict, hid: str) -> bool:
+    """Move an entry's flat device fields into hosts[hid]. Returns True when
+    something was folded. Never drops the flat fields — they stay as the
+    compat mirror."""
+    if host_block(entry, hid):
+        return False
+    block = {k: entry[k] for k in HOST_SCOPED_FIELDS
+             if entry.get(k) not in (None, "")}
+    if not block:
+        return False
+    entry.setdefault("hosts", {})[hid] = block
+    entry["mirror_host"] = hid
+    return True
 
 
 def read_stdin() -> str:
@@ -562,10 +818,11 @@ def cmd_link_root(args: list) -> int:
 
 
 def agent_home(name: str) -> Path | None:
-    """Resolve an agent's home dir: registry first, then ~/.<name>/."""
+    """Resolve an agent's home dir on THIS device: registry first (host block,
+    then the legacy flat field), finally the ~/.<name>/ convention."""
     entry = load_registry().get("agents", {}).get(name, {})
-    home = entry.get("home")
-    if home:
+    home = entry_view(entry).get("home")
+    if home and home != "platform-managed":
         p = Path(home).expanduser()
         if p.is_dir():
             return p
@@ -696,11 +953,14 @@ def drop_link(p: Path) -> bool:
 # ------------------------------------------------------------------- init ---
 
 def read_runtime_version() -> dict:
-    """Read the installed runtime version anchor (~/.agent-guild/VERSION)."""
-    if not VERSION.is_file():
+    """Read the installed runtime version anchor. Host-scoped: each device
+    installs its own copy of the skill package, so the version is a property
+    of the device, not of the shared guild."""
+    path = host_state("VERSION")
+    if not path.is_file():
         return {}
     out = {}
-    for line in VERSION.read_text(encoding="utf-8").splitlines():
+    for line in path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if "=" in line and not line.startswith("#"):
             k, _, v = line.partition("=")
@@ -709,10 +969,11 @@ def read_runtime_version() -> dict:
 
 
 def write_runtime_version(proto: str, skill: str) -> None:
-    """Persist the applied protocol/skill version to the anchor file."""
-    VERSION.write_text(
+    """Persist the applied protocol/skill version for THIS device."""
+    (host_dir(create=True) / "VERSION").write_text(
         "# Agent Guild runtime version — managed by `ag init` / `ag upgrade`.\n"
-        "# Records the version last applied to this central dir. Do not edit.\n"
+        "# Records the version last applied on THIS device. Do not edit.\n"
+        f"host_id={host_id()}\n"
         f"protocol_version={proto}\n"
         f"skill_version={skill}\n",
         encoding="utf-8",
@@ -787,6 +1048,40 @@ def cmd_init(args: list) -> int:
         })
         created_files.append("registry.json")
 
+    # Claim this device (protocol 3.3+). host.json is the device's own record;
+    # host-notes.md is where the user keeps facts that are true HERE only.
+    hd = host_dir(create=True)
+    facts = platform_facts()
+    host_json = hd / "host.json"
+    first_seen = now_iso()
+    if host_json.is_file():
+        try:
+            first_seen = json.loads(host_json.read_text(encoding="utf-8")) \
+                .get("first_seen") or first_seen
+        except (OSError, ValueError):
+            pass
+    atomic_write_json(host_json, {
+        "host_id": facts["host_id"],
+        "platform": facts["platform"],
+        "os": facts["os"],
+        "arch": facts["arch"],
+        "links": facts["links"],
+        "python": facts["python"],
+        "first_seen": first_seen,
+        "last_init": now_iso(),
+    })
+    notes = hd / HOST_NOTES
+    if not notes.exists():
+        notes.write_text(
+            f"# Host notes — {facts['host_id']}\n\n"
+            "> Facts that are true on THIS device only: local tool paths,\n"
+            "> project checkout locations, quirks of this OS install.\n"
+            "> Shared truths belong in identity/ rules/ projects/ instead.\n"
+            f"\n- platform: {facts['platform']}\n"
+            f"- links: {facts['links']}\n",
+            encoding="utf-8")
+        created_files.append(f"hosts/{facts['host_id']}/{HOST_NOTES}")
+
     # Make sure the protocol's own skill is present AND current in the bus.
     # Version-aware self-heal: compare the version this `ag` runs from against
     # the installed anchor (~/.agent-guild/VERSION). If the user upgraded the
@@ -826,7 +1121,7 @@ def cmd_init(args: list) -> int:
 
     # Seed / refresh the root protocol docs. First run seeds them; an upgrade
     # follows the version; when already current they are left alone.
-    for doc in ("ONBOARDING.md", "CONVENTIONS.md", "SPEC.md"):
+    for doc in ("ONBOARDING.md", "CONVENTIONS.md", "SPEC.md", "PORTABILITY.md"):
         target = CENTRAL / doc
         src = None
         for cand in (own_skill / "docs" / doc, skill_src / "docs" / doc):
@@ -848,6 +1143,8 @@ def cmd_init(args: list) -> int:
     print(f"{'initialized' if fresh else 'verified'} {CENTRAL}")
     print(f"  protocol_version : {cur_proto}")
     print(f"  skill_version    : {cur_skill}")
+    print(f"  this device      : {facts['host_id']} "
+          f"({facts['platform']}, links={facts['links']})")
     print(f"  dirs created     : {len(created_dirs)}" + (f" ({', '.join(created_dirs)})" if created_dirs else ""))
     print(f"  files created    : {len(created_files)}" + (f" ({', '.join(created_files)})" if created_files else ""))
     print(f"  own skill        : {skill_status}")
@@ -923,7 +1220,7 @@ def _apply_skill_package(skill_src_dir: Path, proto: str, skill: str) -> None:
     bump the VERSION anchor. User-data dirs are never touched."""
     own_skill = CENTRAL / "skills" / "agent-guild"
     _replace_tree(skill_src_dir, own_skill)
-    for doc in ("ONBOARDING.md", "CONVENTIONS.md", "SPEC.md"):
+    for doc in ("ONBOARDING.md", "CONVENTIONS.md", "SPEC.md", "PORTABILITY.md"):
         src = skill_src_dir / "docs" / doc
         if not src.is_file():
             continue
@@ -1219,6 +1516,21 @@ def cmd_bootstrap(args: list) -> int:
         return 1
     agent = default_agent(args)
     shown = 0
+
+    # Which device am I on? Everything platform- or host-scoped hangs off this.
+    hid = host_id()
+    print(f"\n{'=' * 78}\n== THIS DEVICE\n{'=' * 78}")
+    print(f"host-id  : {hid}   platform: {platform_tag()}   links: {link_capability()}")
+    others = [h for h in known_hosts() if h != hid]
+    print(f"others   : {', '.join(others) if others else '(none seen yet)'}")
+    print(f"host data: hosts/{hid}/   (paths, install state, device-only facts)")
+    print("platform assets: resolve with `ag tool <name>` — never hardcode a path")
+    notes = host_dir() / HOST_NOTES
+    if notes.is_file():
+        body = notes.read_text(encoding="utf-8").rstrip()
+        if body:
+            print(f"\n-- hosts/{hid}/{HOST_NOTES} --\n{body}")
+
     for rel, title in BOOTSTRAP_FILES:
         p = CENTRAL / rel
         print(f"\n{'=' * 78}\n== {title}  ({rel})\n{'=' * 78}")
@@ -1292,9 +1604,13 @@ def cmd_doctor(args: list) -> int:
 
     print("\n== broken links in registered agent homes ==")
     reg = load_registry()
+    local_agents = {n: e for n, e in reg.get("agents", {}).items()
+                    if registered_here(e)}
+    remote_agents = {n: e for n, e in reg.get("agents", {}).items()
+                     if not registered_here(e)}
     agent_dangling = []
-    for name, entry in reg.get("agents", {}).items():
-        sr = entry.get("skills_root")
+    for name, entry in local_agents.items():
+        sr = entry_view(entry).get("skills_root")
         if not sr or sr == "platform-managed":
             continue
         d = Path(sr).expanduser()
@@ -1314,11 +1630,23 @@ def cmd_doctor(args: list) -> int:
     else:
         print("  ok — none")
 
+    print("\n== link direction (the guild owns its payloads) ==")
+    outbound = _outbound_links()
+    if outbound:
+        for p, t in outbound:
+            print(f"  ✗ {p.relative_to(CENTRAL)} -> {t}")
+        print("  the guild must not link OUT: every other device sees a dead "
+              "link. Fix: `ag port --apply` (moves the payload in, links the "
+              "old path back into the guild).")
+        problems += len(outbound)
+    else:
+        print("  ok — no links pointing outside the guild")
+
     print("\n== skills dir consolidation (advisory, not an error) ==")
     guild_resolved = (CENTRAL / "skills").resolve()
     consolidated = per_skill = 0
-    for name, entry in reg.get("agents", {}).items():
-        sr = entry.get("skills_root")
+    for name, entry in local_agents.items():
+        sr = entry_view(entry).get("skills_root")
         if not sr or sr == "platform-managed":
             continue
         d = Path(sr).expanduser()
@@ -1376,21 +1704,30 @@ def cmd_doctor(args: list) -> int:
             print(f"  ✗ unparseable JSON: {rel} ({e})")
         problems += len(bad_json)
 
-    print("\n== registry drift ==")
+    print(f"\n== registry drift (this device: {host_id()}) ==")
     drift = 0
-    for name, entry in reg.get("agents", {}).items():
-        home = entry.get("home", "")
+    for name, entry in local_agents.items():
+        v = entry_view(entry)
+        home = v.get("home", "")
         # "platform-managed" is a sentinel (no real home dir), not a path
         if home and home != "platform-managed" and not Path(home).expanduser().exists():
             print(f"  ✗ [{name}] home does not exist: {home}")
             drift += 1
-        sr = entry.get("skills_root")
+        sr = v.get("skills_root")
         if sr and sr != "platform-managed" and not Path(sr).expanduser().exists():
             print(f"  ✗ [{name}] skills_root does not exist: {sr}")
             drift += 1
     if not drift:
         print("  ok — none")
     problems += drift
+    if remote_agents:
+        print("  other devices (not checked here): " + ", ".join(
+            f"{n} @ {', '.join(other_hosts(e))}" for n, e in remote_agents.items()))
+    legacy_flat = [n for n, e in reg.get("agents", {}).items()
+                   if not isinstance(e.get("hosts"), dict) or not e["hosts"]]
+    if legacy_flat:
+        print(f"  ℹ {len(legacy_flat)} entry(ies) still store device paths flat "
+              f"— run `ag port --apply` to scope them per device")
 
     print(f"\n== protocol version drift (central={PROTOCOL_VERSION}) ==")
     stale_proto = []
@@ -1406,10 +1743,20 @@ def cmd_doctor(args: list) -> int:
     else:
         print("  ok — all agents on the current major version")
 
+    print("\n== portability (multi-device readiness) ==")
+    port_findings = _portability_findings()
+    if port_findings:
+        for f in port_findings:
+            print(f"  ! {f}")
+        print("  detail + mechanical fixes: `ag port` / `ag port --apply`")
+    else:
+        print("  ok — nothing device-specific leaking into shared files")
+
     print(f"\n{'=' * 60}")
     if problems:
         print(f"{problems} problem(s) found. Suggested fixes:")
         print("  broken links      → delete the link (never the target)")
+        print("  outbound links    → `ag port --apply` (payload moves into the guild)")
         print("  missing files     → `ag init` refills gaps without touching data")
         print("  registry drift    → `ag register <agent> <home> <tier> <skills_root>`")
         print("  version drift     → re-run ONBOARDING.md, then re-register")
@@ -1418,18 +1765,610 @@ def cmd_doctor(args: list) -> int:
     return 0
 
 
+# ------------------------------------------------------- portability audit ---
+
+_SKIP_WALK = {".git", ".trash", "__pycache__", "node_modules", ".venv"}
+
+# Paths that only exist on one machine: a home dir with a specific user name,
+# or a Windows drive-rooted user profile.
+_MACHINE_PATH_RE = re.compile(
+    r"(?:/Users/|/home/|/root/)[A-Za-z0-9._-]+/"
+    r"|[A-Za-z]:\\Users\\[A-Za-z0-9._-]+"
+)
+
+# Shared, user-owned text: statements here are supposed to hold on every
+# device, so a machine path in them is a portability bug.
+SHARED_LINT_DIRS = ("identity", "rules", "toolchain", "projects", "memory/shared")
+SHARED_LINT_FILES = ("handoff/shared-state/current-focus.md",)
+
+_WIN_EXT = {".ps1", ".bat", ".cmd"}
+_POSIX_EXT = {".sh", ".command", ".zsh", ".bash"}
+
+
+def _resolve_link(p: Path, raw: str) -> Path:
+    try:
+        base = Path(raw) if os.path.isabs(raw) else (p.parent / raw)
+        return base.resolve()
+    except OSError:
+        return Path(raw)
+
+
+def _inside_guild(path: Path) -> bool:
+    try:
+        central = CENTRAL.resolve()
+    except OSError:
+        return False
+    return path == central or central in path.parents
+
+
+def _walk_links():
+    """Every link inside the guild, without descending through links."""
+    for root, dirs, files in os.walk(CENTRAL, followlinks=False):
+        rootp = Path(root)
+        for name in list(dirs) + list(files):
+            p = rootp / name
+            if is_link(p):
+                yield p, link_target(p)
+        dirs[:] = [d for d in dirs
+                   if d not in _SKIP_WALK and not is_link(rootp / d)]
+
+
+def _outbound_links() -> list:
+    """Links from the guild to an external path — the payload then exists on
+    exactly one device and every other device sees a dead link."""
+    return [(p, raw) for p, raw in _walk_links()
+            if not _inside_guild(_resolve_link(p, raw))]
+
+
+def _absolute_internal_links() -> list:
+    """Links that stay inside the guild but store an absolute path: they break
+    as soon as the user name, home dir, or drive letter differs."""
+    return [(p, raw) for p, raw in _walk_links()
+            if os.path.isabs(raw) and _inside_guild(_resolve_link(p, raw))]
+
+
+def _machine_paths_in_shared(limit: int = 40) -> list:
+    """(relpath, lineno, snippet) for machine paths written into shared text."""
+    hits = []
+    targets = []
+    for rel in SHARED_LINT_DIRS:
+        d = CENTRAL / rel
+        if d.is_dir():
+            targets += [p for p in sorted(d.rglob("*.md")) if p.is_file()]
+    for rel in SHARED_LINT_FILES:
+        p = CENTRAL / rel
+        if p.is_file():
+            targets.append(p)
+    for p in targets:
+        if "archive" in p.parts:
+            continue
+        try:
+            text = p.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        for i, line in enumerate(text.splitlines(), 1):
+            m = _MACHINE_PATH_RE.search(line)
+            if m:
+                hits.append((str(p.relative_to(CENTRAL)), i, m.group(0)))
+                if len(hits) >= limit:
+                    return hits
+    return hits
+
+
+def _declared_platforms(skill_dir: Path) -> list:
+    """`platforms` as declared by a skill (manifest.json or SKILL.md
+    frontmatter). Empty list means "undeclared" = portable by default."""
+    mf = skill_dir / "manifest.json"
+    if mf.is_file():
+        try:
+            d = json.loads(mf.read_text(encoding="utf-8"))
+            p = d.get("platforms")
+            if isinstance(p, list) and p:
+                return [str(x) for x in p]
+        except (OSError, ValueError):
+            pass
+    sk = skill_dir / "SKILL.md"
+    if sk.is_file():
+        try:
+            head = sk.read_text(encoding="utf-8", errors="ignore")[:2000]
+        except OSError:
+            return []
+        m = re.search(r"^platforms:\s*\[?([^\]\n]+)\]?\s*$", head, re.M)
+        if m:
+            return [x.strip().strip("\"'") for x in m.group(1).split(",") if x.strip()]
+    return []
+
+
+def _skill_platform_hints() -> list:
+    """Skills whose payload is clearly single-platform yet declare nothing."""
+    out = []
+    root = CENTRAL / "skills"
+    if not root.is_dir():
+        return out
+    for d in sorted(root.iterdir()):
+        if not d.is_dir() or d.name.startswith("."):
+            continue
+        if _declared_platforms(d):
+            continue
+        exts = set()
+        for p in d.rglob("*"):
+            if p.is_file() and not set(p.parts) & _SKIP_WALK:
+                exts.add(p.suffix.lower())
+        win, posix = exts & _WIN_EXT, exts & _POSIX_EXT
+        if win and not posix:
+            out.append((d.name, "windows"))
+        elif posix and not win and (exts & {".command"}):
+            out.append((d.name, "macos"))
+    return out
+
+
+def _legacy_host_state() -> list:
+    """Pre-3.3 host state still sitting at the guild root."""
+    out = []
+    for new_name, legacy_name in _LEGACY_STATE.items():
+        legacy = CENTRAL / legacy_name
+        if legacy.exists() and not (host_dir() / new_name).exists():
+            out.append((legacy, new_name))
+    return out
+
+
+def _portability_findings() -> list:
+    """Short one-line findings, used by `ag doctor`."""
+    out = []
+    n = len(_outbound_links())
+    if n:
+        out.append(f"{n} link(s) point outside the guild (dead on other devices)")
+    n = len(_absolute_internal_links())
+    if n:
+        out.append(f"{n} internal link(s) store an absolute path (not portable)")
+    n = len(_legacy_host_state())
+    if n:
+        out.append(f"{n} host-scoped state file(s) still at the guild root")
+    hits = _machine_paths_in_shared(limit=6)
+    if hits:
+        out.append("machine paths inside shared text: " + ", ".join(
+            f"{f}:{i}" for f, i, _ in hits[:3])
+            + (" ..." if len(hits) > 3 else ""))
+    undeclared = [d for d in (CENTRAL / "tools").iterdir()
+                  if d.is_dir() and not (d / TOOL_MANIFEST).is_file()
+                  and not d.name.startswith(".")] if TOOLS.is_dir() else []
+    if undeclared:
+        out.append(f"{len(undeclared)} tool(s) without {TOOL_MANIFEST} "
+                   f"(other devices cannot tell 'not for me' from 'missing')")
+    return out
+
+
+# ----------------------------------------------------------- platform tools ---
+
+def _tool_index() -> dict:
+    """slug -> {dir, manifest, declared} for everything under tools/."""
+    idx = {}
+    if not TOOLS.is_dir():
+        return idx
+    try:
+        entries = sorted(TOOLS.iterdir())
+    except OSError:
+        return idx
+    for d in entries:
+        if not d.is_dir() or d.name.startswith("."):
+            continue
+        mf = d / TOOL_MANIFEST
+        man = {}
+        if mf.is_file():
+            try:
+                man = json.loads(mf.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                man = {}
+        keys = {_slug(d.name)}
+        if man.get("name"):
+            keys.add(_slug(str(man["name"])))
+        # `doxygen-1.18.0-official` should also answer to `doxygen`
+        keys.add(_slug(d.name).split("-")[0])
+        for k in keys:
+            if k:
+                idx.setdefault(k, {"dir": d, "manifest": man,
+                                   "declared": mf.is_file()})
+    return idx
+
+
+def _discover_exec(d: Path) -> Path | None:
+    """Best-guess executable inside a tool dir (used to seed a manifest)."""
+    want = _slug(d.name).split("-")[0]
+    cands = []
+    for root, dirs, files in os.walk(d):
+        dirs[:] = [x for x in dirs if x not in _SKIP_WALK and not x.startswith(".")]
+        for f in files:
+            p = Path(root) / f
+            if p.suffix.lower() in (".json", ".md", ".txt", ".cfg", ".yml",
+                                    ".yaml", ".plist", ".dylib", ".so"):
+                continue
+            if p.is_symlink():
+                continue
+            if os.name == "nt":
+                ok = p.suffix.lower() in (".exe", ".bat", ".cmd", ".ps1")
+            else:
+                ok = os.access(p, os.X_OK)
+            if ok:
+                cands.append(p)
+    if not cands:
+        return None
+    cands.sort(key=lambda p: (0 if _slug(p.stem) == want else 1,
+                              len(p.parts), len(p.name)))
+    return cands[0]
+
+
+def resolve_tool(name: str) -> dict:
+    """Where is `name` runnable on THIS device?
+
+    Order: manifest entry for <os>-<arch> -> manifest entry for <os> ->
+    manifest `any` -> PATH. An honest "unavailable + how to install here" beats
+    a path that only exists on one machine.
+    """
+    tag, osx = platform_tag(), detect_os()
+    out = {"name": name, "status": "unavailable", "path": "", "how": "",
+           "hint": "", "install": "", "declared": []}
+    entry = _tool_index().get(_slug(name))
+    if entry is None:
+        w = shutil.which(name)
+        if w:
+            out.update(status="ok", path=w, how="PATH (undeclared tool)")
+        else:
+            out["hint"] = (f"no tools/*/{TOOL_MANIFEST} declares '{name}' and it "
+                           f"is not on PATH")
+        return out
+
+    d, man = entry["dir"], entry["manifest"]
+    plats = man.get("platforms") or {}
+    out["declared"] = sorted(plats)
+    for key in (tag, osx):
+        spec = plats.get(key)
+        if not isinstance(spec, dict):
+            continue
+        rel = spec.get("exec")
+        if rel:
+            p = d / rel
+            if p.exists():
+                out.update(status="ok", path=str(p), how=f"declared:{key}")
+                return out
+            out["hint"] = f"declared for {key} but the file is missing: {p}"
+        on_path = spec.get("exec_on_path")
+        if on_path:
+            w = shutil.which(on_path)
+            if w:
+                out.update(status="ok", path=w, how=f"PATH:{key}")
+                return out
+    anyspec = man.get("any") if isinstance(man.get("any"), dict) else {}
+    on_path = anyspec.get("exec_on_path") or man.get("exec_on_path")
+    if on_path:
+        w = shutil.which(on_path)
+        if w:
+            out.update(status="ok", path=w, how="PATH:any")
+            return out
+    w = shutil.which(str(man.get("name") or name))
+    if w:
+        out.update(status="ok", path=w, how="PATH")
+        return out
+
+    for key in (tag, osx):
+        spec = plats.get(key)
+        if isinstance(spec, dict) and spec.get("install"):
+            out["install"] = str(spec["install"])
+            break
+    out["install"] = out["install"] or str(anyspec.get("install") or man.get("install") or "")
+    if not out["hint"]:
+        declared = ", ".join(out["declared"]) or "none"
+        out["hint"] = (f"not available on {tag} (declared platforms: {declared})")
+    return out
+
+
+def cmd_tool(args: list) -> int:
+    """Print the executable path for this device. Exit 3 when unavailable, so
+    a caller can branch instead of running a path that does not exist."""
+    rest = [a for a in args if not a.startswith("-")]
+    if not rest:
+        print("usage: ag tool <name> [--json]", file=sys.stderr)
+        return 2
+    info = resolve_tool(rest[0])
+    if "--json" in args:
+        print(json.dumps(info, ensure_ascii=False, indent=2))
+        return 0 if info["status"] == "ok" else 3
+    if info["status"] == "ok":
+        print(info["path"])
+        return 0
+    print(f"{info['name']}: {info['hint']}", file=sys.stderr)
+    if info["install"]:
+        print(f"install on {platform_tag()}: {info['install']}", file=sys.stderr)
+    return 3
+
+
+def cmd_tools(args: list) -> int:
+    idx = _tool_index()
+    if not idx:
+        print(f"no tools under {TOOLS}")
+        return 0
+    seen, rows = set(), []
+    for key, e in sorted(idx.items()):
+        d = e["dir"]
+        if d in seen:
+            continue
+        seen.add(d)
+        info = resolve_tool(key)
+        rows.append((d.name, info, e["declared"]))
+    print(f"platform: {platform_tag()}   (tools/ declared for this device)")
+    print(f"{'tool':<32} {'status':<12} resolved / hint")
+    print("-" * 78)
+    for name, info, declared in rows:
+        status = "ok" if info["status"] == "ok" else "unavailable"
+        detail = info["path"] if info["status"] == "ok" else info["hint"]
+        if not declared:
+            status = status + "*"
+        print(f"{name:<32} {status:<12} {detail}")
+    if any(not d for _, _, d in rows):
+        print(f"\n* no {TOOL_MANIFEST} — run `ag port --apply` to declare this "
+              f"device's platform for it")
+    print("\nusage in scripts:  BIN=$(ag tool <name>) || handle-unavailable")
+    return 0
+
+
+# ------------------------------------------------------------ ag platform ---
+
+def cmd_platform(args: list) -> int:
+    facts = platform_facts()
+    if "--json" in args:
+        print(json.dumps(facts, ensure_ascii=False, indent=2))
+        return 0
+    print(f"host-id   : {facts['host_id']}")
+    print(f"platform  : {facts['platform']}  (os={facts['os']}, arch={facts['arch']})")
+    print(f"links     : {facts['links']}")
+    print(f"python    : {facts['python']} ({facts['python_version']})")
+    print(f"guild     : {facts['central']}")
+    print(f"host state: hosts/{facts['host_id']}/")
+    others = [h for h in facts["known_hosts"] if h != facts["host_id"]]
+    print(f"other devices: {', '.join(others) if others else '(none seen yet)'}")
+    print("\nscope rules:")
+    print("  shared   — true everywhere            -> normal guild paths")
+    print("  platform — one os+arch                -> tools/<t>/tool.json, ag tool <t>")
+    print(f"  host     — this device only           -> hosts/{facts['host_id']}/")
+    return 0
+
+
+# ---------------------------------------------------------------- ag port ---
+
+def _internalize(link: Path, raw: str) -> str:
+    """Turn an outbound link into guild-owned payload.
+
+    The guild owns its payloads; other devices must find the real files here.
+    So: drop the link, move the external target in, then link the old external
+    path back INTO the guild (inbound links are the portable direction).
+    """
+    target = _resolve_link(link, raw)
+    if not target.exists():
+        return (f"dangling outbound link left untouched: "
+                f"{link.relative_to(CENTRAL)} -> {raw} (target missing)")
+    if not drop_link(link):
+        return f"could not drop link {link} — skipped"
+    try:
+        shutil.move(str(target), str(link))
+    except OSError as e:
+        make_link(link, target)  # restore, never leave the guild worse off
+        return f"move failed for {link.name}: {e}"
+    ok, how = make_link(target, link)
+    back = f", old path linked back ({how})" if ok else \
+           f", old path NOT recreated ({how}) — payload now lives only in the guild"
+    audit("port_internalize", {"path": str(link), "from": str(target)})
+    return f"internalized {link.relative_to(CENTRAL)} <- {target}{back}"
+
+
+def _relativize(link: Path, raw: str) -> str:
+    """Rewrite an absolute intra-guild link as a relative one.
+
+    The relative path is computed against the guild's own (unresolved) layout,
+    so it stays short and inside the guild even when the guild itself sits
+    behind a symlinked mount point.
+    """
+    target = _resolve_link(link, raw)
+    try:
+        inside = CENTRAL / target.relative_to(CENTRAL.resolve())
+    except ValueError:
+        inside = target
+    try:
+        rel = os.path.relpath(str(inside), str(link.parent))
+    except ValueError as e:
+        return f"cannot relativize {link.name}: {e}"
+    if not drop_link(link):
+        return f"could not drop link {link} — skipped"
+    ok, how = make_link(link, Path(rel))
+    if not ok:
+        make_link(link, target)
+        return f"relativize failed for {link.name} ({how}) — absolute link restored"
+    audit("port_relativize", {"path": str(link), "target": rel})
+    return f"{link.relative_to(CENTRAL)} -> {rel} (relative, portable)"
+
+
+def _seed_tool_manifest(d: Path) -> str:
+    """Declare the CURRENT device's platform for an undeclared tool.
+
+    Nothing is moved: a tool's internals often depend on their own layout.
+    Declaring is enough — another device then gets an honest "not available
+    here" plus an install hint instead of a broken path.
+    """
+    exe = _discover_exec(d)
+    tag = platform_tag()
+    name = _slug(d.name).split("-")[0] or _slug(d.name)
+    man = {
+        "name": name,
+        "description": f"{name} — declared per platform; resolve with `ag tool {name}`",
+        "platforms": {},
+        "any": {"exec_on_path": name},
+    }
+    if exe:
+        man["platforms"][tag] = {"exec": str(exe.relative_to(d))}
+    (d / TOOL_MANIFEST).write_text(
+        json.dumps(man, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    audit("port_declare_tool", {"tool": d.name, "platform": tag})
+    return (f"{d.name}/{TOOL_MANIFEST} created "
+            + (f"({tag} -> {exe.relative_to(d)})" if exe
+               else f"(no executable found; only PATH fallback declared)"))
+
+
+def cmd_port(args: list) -> int:
+    """Portability audit for a guild shared by several devices.
+
+    Default is a DRY-RUN report. `--apply` performs only the mechanical,
+    reversible fixes; user-written text is never rewritten automatically.
+    """
+    if not CENTRAL.exists():
+        print(f"{CENTRAL} missing — run `ag init` first", file=sys.stderr)
+        return 1
+    apply_ = "--apply" in args
+    hid = host_id()
+    did, todo = [], []
+
+    print(f"== this device ==")
+    print(f"  host-id  : {hid}")
+    print(f"  platform : {platform_tag()}   links: {link_capability()}")
+    others = [h for h in known_hosts() if h != hid]
+    print(f"  others   : {', '.join(others) if others else '(none seen yet)'}")
+
+    print("\n== host-scoped state ==")
+    legacy = _legacy_host_state()
+    if not legacy:
+        print(f"  ok — already under hosts/{hid}/")
+    for src, new_name in legacy:
+        if apply_:
+            dest = host_dir(create=True) / new_name
+            try:
+                shutil.move(str(src), str(dest))
+                did.append(f"moved {src.name} -> hosts/{hid}/{new_name}")
+            except OSError as e:
+                todo.append(f"could not move {src.name}: {e}")
+        else:
+            todo.append(f"move {src.name} -> hosts/{hid}/{new_name}")
+
+    print("\n== registry scoping ==")
+    reg = load_registry()
+    changed = []
+    for name, entry in reg.get("agents", {}).items():
+        hosts = entry.get("hosts")
+        if isinstance(hosts, dict) and hosts:
+            continue
+        if apply_:
+            if fold_entry_to_host(entry, hid):
+                changed.append(name)
+        else:
+            todo.append(f"fold device paths of '{name}' into hosts.{hid}")
+    if apply_ and changed:
+        reg["protocol_version"] = PROTOCOL_VERSION
+        save_registry(reg, "port", "port_registry")
+        did.append(f"scoped {len(changed)} registry entry(ies) to {hid}: "
+                   + ", ".join(changed))
+    if not changed and not any(t.startswith("fold ") for t in todo):
+        print("  ok — every entry is already device-scoped")
+
+    print("\n== link direction (guild owns payloads, links point inward) ==")
+    outbound = _outbound_links()
+    if not outbound:
+        print("  ok — no outbound links")
+    for p, raw in outbound:
+        if apply_:
+            did.append(_internalize(p, raw))
+        else:
+            todo.append(f"internalize {p.relative_to(CENTRAL)} -> {raw} "
+                        f"(move payload in, link the old path back)")
+    absolute = _absolute_internal_links()
+    if not absolute:
+        print("  ok — no absolute intra-guild links")
+    for p, raw in absolute:
+        if apply_:
+            did.append(_relativize(p, raw))
+        else:
+            todo.append(f"relativize {p.relative_to(CENTRAL)} -> {raw}")
+
+    print("\n== platform tools ==")
+    undeclared = []
+    if TOOLS.is_dir():
+        for d in sorted(TOOLS.iterdir()):
+            if d.is_dir() and not d.name.startswith(".") \
+                    and not (d / TOOL_MANIFEST).is_file():
+                undeclared.append(d)
+    if not undeclared:
+        print(f"  ok — every tool declares its platforms ({TOOL_MANIFEST})")
+    for d in undeclared:
+        if apply_:
+            did.append(_seed_tool_manifest(d))
+        else:
+            todo.append(f"declare platforms for tools/{d.name} "
+                        f"({TOOL_MANIFEST})")
+    print(f"  recommended layout for multi-platform payloads: "
+          f"tools/<name>/bin/<os>-<arch>/…")
+
+    print("\n== shared text vs machine paths (report only) ==")
+    hits = _machine_paths_in_shared()
+    if not hits:
+        print("  ok — no machine paths in shared files")
+    for f, i, snippet in hits:
+        print(f"  ! {f}:{i}  {snippet}")
+    if hits:
+        print(f"  fix by hand: use ~ / a placeholder, or move the fact to "
+              f"hosts/{hid}/{HOST_NOTES}")
+
+    print("\n== single-platform skills without a declaration (report only) ==")
+    hints = _skill_platform_hints()
+    if not hints:
+        print("  ok — nothing obviously platform-locked is undeclared")
+    for name, guess in hints:
+        print(f"  ! skills/{name}: payload looks {guess}-only — add "
+              f"\"platforms\": [\"{guess}\"] to its manifest")
+
+    print(f"\n{'=' * 60}")
+    if apply_:
+        for d in did:
+            print(f"  ✓ {d}")
+        for t in todo:
+            print(f"  ! {t}")
+        print(f"\napplied {len(did)} fix(es)."
+              + (f" {len(todo)} need a human." if todo else ""))
+    else:
+        for t in todo:
+            print(f"  → {t}")
+        print(f"\n{len(todo)} mechanical fix(es) available — run "
+              f"`ag port --apply`." if todo else
+              "\nnothing mechanical to fix.")
+    return 0
+
+
 # ------------------------------------------------------- existing commands ---
 
-def cmd_status(_args=None) -> int:
+def cmd_status(args=None) -> int:
     data = load_registry()
     agents = data.get("agents", {})
     if not agents:
         print("No agents registered.")
         return 0
-    print(f"{'agent':<12} {'tier':<10} {'last_seen'}")
+    show_all = bool(args) and "--all" in args
+    hid = host_id()
+    print(f"this device: {hid}")
+    print(f"{'agent':<12} {'tier':<14} {'last_seen'}")
     print("-" * 60)
+    elsewhere = []
     for name, e in sorted(agents.items()):
-        print(f"{name:<12} {e.get('install_tier','?'):<10} {e.get('last_seen','?')}")
+        if not show_all and not registered_here(e):
+            elsewhere.append((name, other_hosts(e)))
+            continue
+        v = entry_view(e)
+        here = registered_here(e)
+        tier = v.get("install_tier", "?") if here else "(other device)"
+        print(f"{name:<12} {tier:<14} {v.get('last_seen','?') if here else ''}")
+        if show_all:
+            for h in other_hosts(e):
+                b = host_block(e, h)
+                print(f"  └ on {h}: tier={b.get('install_tier','?')} "
+                      f"last_seen={b.get('last_seen','?')}")
+    for name, hosts in elsewhere:
+        print(f"{name:<12} {'(other device)':<14} {', '.join(hosts)}")
+    if elsewhere and not show_all:
+        print("\n(entries marked (other device) are installed on another "
+              "machine — `ag status --all` for details)")
     return 0
 
 
@@ -1440,21 +2379,27 @@ def cmd_register(args: list) -> int:
     name, home, tier = args[0], args[1], args[2]
     skills_root = args[3] if len(args) > 3 else None
     caps = args[4:] or ["read_files", "write_files"]
+    hid = host_id()
+    stamp = now_iso()
     data = load_registry()
     data.setdefault("agents", {})
     entry = data["agents"].get(name, {})
     entry.update(
-        joined_at=entry.get("joined_at", now_iso()),
-        home=home,
-        last_seen=now_iso(),
+        joined_at=entry.get("joined_at", stamp),
         protocol_version=PROTOCOL_VERSION,
-        install_tier=tier,
-        skills_root=skills_root,
         capabilities=caps,
     )
+    # device-scoped facts
+    block = dict(host_block(entry, hid))
+    block.update(home=home, skills_root=skills_root,
+                 install_tier=tier, last_seen=stamp)
+    entry.setdefault("hosts", {})[hid] = block
+    # compat mirror for pre-3.3 readers on this same device
+    entry.update(home=home, skills_root=skills_root, install_tier=tier,
+                 last_seen=stamp, mirror_host=hid)
     data["agents"][name] = entry
     save_registry(data, name, "register")
-    print(f"registered {name} (tier={tier}, protocol={PROTOCOL_VERSION})")
+    print(f"registered {name} (tier={tier}, protocol={PROTOCOL_VERSION}, host={hid})")
     return 0
 
 
@@ -1468,9 +2413,14 @@ def cmd_last_seen(args: list) -> int:
     if name not in agents:
         print(f"agent '{name}' not registered — run: ag register {name} <home> <tier>", file=sys.stderr)
         return 1
-    agents[name]["last_seen"] = now_iso()
+    hid, stamp = host_id(), now_iso()
+    entry = agents[name]
+    fold_entry_to_host(entry, hid)
+    entry.setdefault("hosts", {}).setdefault(hid, {})["last_seen"] = stamp
+    entry["last_seen"] = stamp
+    entry["mirror_host"] = hid
     save_registry(data, name, "last_seen")
-    print(f"{name} last_seen updated")
+    print(f"{name} last_seen updated (host={hid})")
     return 0
 
 
@@ -1502,9 +2452,14 @@ def cmd_log(args: list) -> int:
         print("empty log body", file=sys.stderr)
         return 2
     day = datetime.now().strftime("%Y-%m-%d")
+    # One device: keep the historical name. Several devices: suffix with the
+    # host-id, so two machines appending on the same day cannot collide when
+    # the guild is carried between them.
     path = DAILY / f"{day}-{agent}.md"
+    if len(known_hosts()) > 1 and not path.exists():
+        path = DAILY / f"{day}-{agent}.{host_id()}.md"
     atomic_append(path, f"\n## {title}\n\n{body}")
-    print(f"appended to log/daily/{day}-{agent}.md")
+    print(f"appended to log/daily/{path.name}")
     return 0
 
 
@@ -1514,7 +2469,8 @@ def cmd_focus(args: list) -> int:
         return 2
     agent, title = args[0], args[1]
     body = read_stdin()
-    block = f"> Last updated: {now_iso()} by {agent}\n\n## {title}\n\n{body}\n\n---\n"
+    block = (f"> Last updated: {now_iso()} by {agent} @{host_id()}\n\n"
+             f"## {title}\n\n{body}\n\n---\n")
     existing = FOCUS.read_text(encoding="utf-8") if FOCUS.exists() else ""
     existing = re.sub(r"^#\s*Current Focus\s*\n+", "", existing.lstrip())
     new = "# Current Focus\n\n" + block + existing
@@ -1660,6 +2616,7 @@ def cmd_learn(args: list) -> int:
         f"\n## [{entry_id}] {heading_cat}\n\n"
         f"**Logged**: {now_iso()}\n"
         f"**By**: {agent}\n"
+        f"**Host**: {host_id()}\n"
         f"**Priority**: {priority}\n"
         f"**Status**: pending\n"
         f"**Area**: {area or 'unspecified'}\n\n"
@@ -1800,7 +2757,7 @@ def load_retention() -> dict:
 # current-focus blocks are opened by an `ag focus`-style marker line.
 # The timestamp is captured leniently up to " by <agent>": agents have been
 # observed writing "2026-08-03 11:47" (space, no tz) instead of strict ISO.
-_FOCUS_TS_RE = re.compile(r"^> Last updated: (.+?) by \S+\s*$", re.M)
+_FOCUS_TS_RE = re.compile(r"^> Last updated: (.+?) by \S+(?:\s+@\S+)?\s*$", re.M)
 _FOCUS_SEP = "\n---\n"
 
 
@@ -2026,7 +2983,8 @@ def _groom(cfg: dict, dry_run: bool = False):
 
 
 def _record_groom(acts: list, notes: list) -> None:
-    atomic_write_json(GROOM_STATE, {
+    atomic_write_json(groom_state_write(), {
+        "host_id": host_id(),
         "last_run": now_iso(),
         "last_actions": acts,
         "last_notes": notes,
@@ -2034,10 +2992,11 @@ def _record_groom(acts: list, notes: list) -> None:
 
 
 def _groom_due(cfg: dict) -> bool:
-    if not GROOM_STATE.is_file():
+    state = groom_state_read()
+    if not state.is_file():
         return True
     try:
-        last = json.loads(GROOM_STATE.read_text(encoding="utf-8")).get("last_run", "")
+        last = json.loads(state.read_text(encoding="utf-8")).get("last_run", "")
     except (json.JSONDecodeError, OSError):
         return True
     t = _parse_iso(last)
@@ -2116,7 +3075,9 @@ def cmd_prune(args: list) -> int:
     now = datetime.now(timezone.utc)
     stale = []
     for name, e in data.get("agents", {}).items():
-        ls = e.get("last_seen")
+        if not registered_here(e):
+            continue  # another device's install — not ours to judge
+        ls = entry_view(e).get("last_seen")
         if not ls:
             continue
         try:
@@ -2149,6 +3110,10 @@ def main() -> int:
         "adopt": cmd_adopt,
         "bootstrap": cmd_bootstrap,
         "doctor": cmd_doctor,
+        "platform": cmd_platform,
+        "tool": cmd_tool,
+        "tools": cmd_tools,
+        "port": cmd_port,
         "upgrade": cmd_upgrade,
         "status": cmd_status,
         "register": cmd_register,
