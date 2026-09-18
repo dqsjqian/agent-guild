@@ -106,11 +106,13 @@ check "single top-level directory (agent-guild/)" "$([ "$TOPDIRS" = "1" ] && ech
 check "SKILL.md at package root" "$([ -f "$PKG/SKILL.md" ] && echo 0 || echo 1)"
 
 DEEP="$(cd "$STAGE" && find . -type f | sed 's|^\./||' | awk -F/ 'NF>3' | head -5)"
-check "path depth <= 3 segments" "$([ -z "$DEEP" ] && echo 0 || echo 1)"
-[ -n "$DEEP" ] && echo "$DEEP" | sed 's/^/       too deep: /'
-
 NOEXT="$(cd "$PKG" && find . -type f ! -name "*.*" | head -5)"
 if [ -n "${MARKET:-}" ]; then
+  # Registry constraints — only the market layout promises to satisfy them.
+  # The default layout deliberately ships docs/adapters/ and docs/examples/,
+  # which are one segment deeper.
+  check "path depth <= 3 segments" "$([ -z "$DEEP" ] && echo 0 || echo 1)"
+  [ -n "$DEEP" ] && echo "$DEEP" | sed 's/^/       too deep: /'
   check "no extensionless files" "$([ -z "$NOEXT" ] && echo 0 || echo 1)"
   [ -n "$NOEXT" ] && echo "$NOEXT" | sed 's/^/       extensionless: /'
 fi
