@@ -29,8 +29,9 @@ display_name_en: Agent Guild
 description_zh: 跨 agent 共享记忆协议，本机多个 AI 共用一份身份/规则/记忆，可跨设备搬运
 description_en: Cross-agent shared memory protocol — one identity, rules and memory for every AI on your devices
 author: dqsjqian
+category: productivity
 protocol_version: "3.3"
-version: "3.8.0"
+version: "3.8.1"
 platforms: ["macos", "windows", "linux", "android", "ios"]
 license: MIT
 homepage: https://github.com/dqsjqian/agent-guild

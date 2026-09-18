@@ -113,6 +113,14 @@ PROTOCOL_VERSION = "3.3"
 TOOL_MANIFEST = "tool.json"
 HOST_NOTES = "host-notes.md"
 
+# Root-level protocol docs seeded into the central dir by `ag init`.
+PROTOCOL_DOCS = ("ONBOARDING.md", "CONVENTIONS.md", "SPEC.md", "PORTABILITY.md")
+
+# Where those docs may sit inside a skill package. Registries differ on the
+# sanctioned layout: some take `docs/`, others only allow references/ scripts/
+# templates/. Both are accepted so one package works everywhere.
+DOC_DIRS = ("docs", "references")
+
 # Canonical OS tags. Anything unrecognised degrades to a sanitized
 # platform.system() value instead of being guessed into the wrong family.
 OS_TAGS = ("macos", "windows", "linux", "android", "ios")
@@ -1121,12 +1129,19 @@ def cmd_init(args: list) -> int:
 
     # Seed / refresh the root protocol docs. First run seeds them; an upgrade
     # follows the version; when already current they are left alone.
-    for doc in ("ONBOARDING.md", "CONVENTIONS.md", "SPEC.md", "PORTABILITY.md"):
+    # Docs are looked up in both layouts a registry may require: `docs/` as in
+    # the repository, and `references/` as used by hosts that only sanction
+    # references/ scripts/ templates/ inside a skill package.
+    for doc in PROTOCOL_DOCS:
         target = CENTRAL / doc
         src = None
-        for cand in (own_skill / "docs" / doc, skill_src / "docs" / doc):
-            if cand.is_file():
-                src = cand
+        for base in (own_skill, skill_src):
+            for sub in DOC_DIRS:
+                cand = base / sub / doc
+                if cand.is_file():
+                    src = cand
+                    break
+            if src is not None:
                 break
         if src is None:
             continue
@@ -1220,9 +1235,14 @@ def _apply_skill_package(skill_src_dir: Path, proto: str, skill: str) -> None:
     bump the VERSION anchor. User-data dirs are never touched."""
     own_skill = CENTRAL / "skills" / "agent-guild"
     _replace_tree(skill_src_dir, own_skill)
-    for doc in ("ONBOARDING.md", "CONVENTIONS.md", "SPEC.md", "PORTABILITY.md"):
-        src = skill_src_dir / "docs" / doc
-        if not src.is_file():
+    for doc in PROTOCOL_DOCS:
+        src = None
+        for sub in DOC_DIRS:
+            cand = skill_src_dir / sub / doc
+            if cand.is_file():
+                src = cand
+                break
+        if src is None:
             continue
         body = src.read_text(encoding="utf-8")
         target = CENTRAL / doc
