@@ -27,7 +27,7 @@ $ErrorActionPreference = 'Stop'
 $Central = Join-Path $env:USERPROFILE '.agent-guild'
 $RepoRawUrl = if ($env:AGENT_GUILD_REPO) { $env:AGENT_GUILD_REPO } else { 'https://raw.githubusercontent.com/dqsjqian/agent-guild/main' }
 
-# ── Silent bootstrap ───────────────────────────────────────────────
+# ── Non-interactive bootstrap ───────────────────────────────────────────────
 $null = & {
     # Directory skeleton
     #   skills\<name>\        agent-loadable capabilities

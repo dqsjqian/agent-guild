@@ -31,7 +31,7 @@ description_en: Cross-agent shared memory protocol — one identity, rules and m
 author: dqsjqian
 category: productivity
 protocol_version: "3.3"
-version: "3.8.1"
+version: "3.8.2"
 platforms: ["macos", "windows", "linux", "android", "ios"]
 license: MIT
 homepage: https://github.com/dqsjqian/agent-guild
@@ -66,7 +66,7 @@ agent_created: true
 
 ## Mandatory Session Contract (once per session, MUST)
 
-> ⛔ 这些是**强制动作**，不是建议。每次会话开始（或首次需要用户上下文时）执行，不要等用户点名。
+> ⛔ 这些是**强制动作**，不是建议。本 skill 被触发时就执行一遍，不必等用户逐项点名。
 > 全部通过 `ag` 一条命令完成，别手工开五个文件。
 >
 > **No shell / no Python?** Every step below has a plain-file equivalent — read
@@ -330,6 +330,25 @@ $AG port --apply      # 只做机械修复：host 状态归位、registry 按设
 用户换新设备时：把目录搬过去 → `ag init <agent>`（自动认领新 host-id）→
 `ag port` 看差异 → 按提示装缺的平台工具。老设备的数据一个字节都不用改。
 
+## What this skill does on your machine (capability disclosure)
+
+一份零依赖 Python CLI（`scripts/ag.py`，只用标准库）+ 一堆 Markdown/JSON。
+数据全部留在本机 `~/.agent-guild/`：无遥测、无统计、无账号、无后台进程。
+
+| 敏感操作 | 干什么用 | 边界 |
+|---|---|---|
+| 网络请求 | 只有 `ag upgrade` 查版本 / 下载本 skill 自己的发布包 | 固定的公开版本接口 + 本项目 release 地址；请求不带任何本机数据；`--apply` 才下载 |
+| 创建进程 | 回收站工具（`trash` / `gio trash` / PowerShell）、Windows `mklink /J` | 固定白名单命令 + 参数数组，全程无 shell 拼接 |
+| 临时文件 | 原子写（写临时文件再 `os.replace`），探测本机能否建软链 | `tempfile`，用完即清 |
+| 读环境变量 | `AGENT_GUILD_DIR` / `AG_AGENT` / `AG_HOST_ID` / `AG_PLATFORM` 等配置与平台探测 | 不读任何凭据，读到的东西不出网 |
+| 删除文件 | 清理失效软链、轮转过期数据 | **从不硬删**：进系统回收站或 `~/.agent-guild/.trash/`；软链只解链不删目标 |
+| 写文件 / 移动复制 | 把散落资产收敛进协会、归档过期数据 | 默认 dry-run，`--apply` 才动；写入限于 `~/.agent-guild/`；搬完校验、失败回滚；凭据目录不参与 |
+| 修改权限 | 安装脚本给本项目自己的 CLI 加可执行位 | 仅 `scripts/ag.py` 与 `scripts/install.sh` |
+| 采集系统信息 | 区分设备：OS / 架构 / 主机名 / 能否建软链 | 只写本机 `hosts/<host-id>/host.json`，不外传；`AG_HOST_ID` 可自定义替换主机名 |
+
+逐条对应源码位置、验证命令与"刻意不做的事"清单见 `references/SECURITY.md`。
+本 skill 不要求任何 agent 隐藏行为、绕过宿主确认或提升权限。
+
 ## Failure modes
 
 - Some files missing → read what exists, note the rest, don't block.
@@ -343,5 +362,6 @@ $AG port --apply      # 只做机械修复：host 状态归位、registry 按设
 - Conventions: `docs/CONVENTIONS.md`
 - Learning ledger (self-improvement): `docs/LEARNINGS.md`
 - Cross-device portability: `docs/PORTABILITY.md`
+- Security & capability disclosure: `docs/SECURITY.md`
 - Repository: https://github.com/dqsjqian/agent-guild
 - License: MIT

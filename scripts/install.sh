@@ -20,7 +20,7 @@ set -e
 CENTRAL="$HOME/.agent-guild"
 REPO_RAW_URL="${AGENT_GUILD_REPO:-https://raw.githubusercontent.com/dqsjqian/agent-guild/main}"
 
-# ── Silent bootstrap ───────────────────────────────────────────────
+# ── Non-interactive bootstrap ───────────────────────────────────────────────
 {
   if ! command -v curl >/dev/null 2>&1; then
     echo "✗ curl not found. Please install curl." >&2

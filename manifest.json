@@ -2,12 +2,13 @@
   "$schema": "https://github.com/dqsjqian/agent-guild/raw/main/spec/manifest.schema.json",
   "name": "agent-guild",
   "protocol_version": "3.3",
-  "skill_version": "3.8.1",
+  "skill_version": "3.8.2",
   "spec_url": "https://github.com/dqsjqian/agent-guild/blob/main/docs/SPEC.md",
   "onboarding_url": "https://github.com/dqsjqian/agent-guild/blob/main/docs/ONBOARDING.md",
   "skill_url": "https://github.com/dqsjqian/agent-guild/blob/main/SKILL.md",
   "conventions_url": "https://github.com/dqsjqian/agent-guild/blob/main/docs/CONVENTIONS.md",
   "portability_url": "https://github.com/dqsjqian/agent-guild/blob/main/docs/PORTABILITY.md",
+  "security_url": "https://github.com/dqsjqian/agent-guild/blob/main/docs/SECURITY.md",
   "scripts": {
     "cli": "scripts/ag.py",
     "package": "scripts/package.sh"
@@ -67,7 +68,8 @@
     "inbox_pattern": "handoff/inbox/from-{src}-to-{dst}-{topic}.md",
     "portability": "docs/PORTABILITY.md",
     "tool_manifest_pattern": "tools/{tool-name}/tool.json",
-    "host_state_pattern": "hosts/{host-id}/{host.json,host-notes.md,VERSION,groom.json}"
+    "host_state_pattern": "hosts/{host-id}/{host.json,host-notes.md,VERSION,groom.json}",
+    "security": "docs/SECURITY.md"
   },
   "lifecycle": {
     "_note": "Onboarding (one-time) and runtime (recurring) are deliberately decoupled. Agents read ONBOARDING.md exactly once when joining; afterwards the runtime SKILL.md handles all ongoing operations.",
@@ -251,5 +253,19 @@
     "linux",
     "android",
     "ios"
-  ]
+  ],
+  "capability_disclosure": {
+    "_note": "Every sensitive operation the CLI can perform, why it exists, and its boundary. Full detail with source locations in docs/SECURITY.md.",
+    "data_location": "All data stays in ~/.agent-guild/ on the user's machine. No telemetry, no analytics, no phone-home, no account, no daemon.",
+    "network": "Only `ag upgrade`: version check against the public endpoints in VERSION_SOURCES, and downloading this project's own release archive under --apply. Requests carry no user data.",
+    "process_creation": "OS trash helpers (trash / trash-put / gio trash), PowerShell Recycle Bin, and `cmd /c mklink /J` when symlinks need elevation. Fixed argument vectors, never a shell string.",
+    "temp_files": "Atomic writes (temp file in the same dir, then os.replace), upgrade staging, and probing whether this device supports symlinks.",
+    "env_vars": "AGENT_GUILD_DIR, AG_AGENT, AG_HOST_ID, AG_PLATFORM, APPDATA, PREFIX, ANDROID_ROOT. No credentials are read.",
+    "deletes": "Never hard-deletes. Deletes go to the OS trash or ~/.agent-guild/.trash/<timestamp>/. Links are unlinked, never trashed. rmtree only on temp/staging dirs created in the same run.",
+    "writes": "Inside ~/.agent-guild/. Outside it, only the links an agent asks for during adopt / link-root / port, which point back into the guild.",
+    "permissions": "chmod +x on this project's own scripts/ag.py and scripts/install.sh after download.",
+    "system_info": "OS tag, CPU architecture, hostname, Python version and link capability, used to tell devices apart. Written to hosts/<host-id>/host.json locally, never transmitted; AG_HOST_ID overrides the hostname.",
+    "file_moves": "adopt / link-root / port / groom consolidate assets and archive expired data. Dry-run by default, --apply required, verified after the move with rollback on failure, credentials excluded.",
+    "instruction_shaped_text": "references/ONBOARDING.md documents a joining procedure in the imperative because it is a procedure. It runs only when the user asks to join, stated at the top of the file. The skill never asks an agent to conceal actions, bypass host confirmation, or escalate privileges."
+  }
 }

@@ -609,11 +609,12 @@ def _candidate_roots(name: str) -> list:
 
 
 def cmd_find_root(args: list) -> int:
-    """Locate a user-extensible skills dir WITHOUT asking the user.
+    """Locate a user-extensible skills dir by checking well-known paths.
 
     Order: registry entry → common paths. Never full-disk probes. If nothing
     is found, print a READONLY verdict and exit 0 — joining read-only is the
-    correct fallback, not a failure. Silent and autonomous by design.
+    correct fallback, not a failure. An agent's own install path is something
+    it can look up; the user usually cannot.
     """
     agent = default_agent(args)
     entry = load_registry().get("agents", {}).get(agent, {})
@@ -635,7 +636,7 @@ def cmd_find_root(args: list) -> int:
     print("SKILLS_ROOT=not-found")
     print("TIER=readonly")
     print("VERDICT=no user-extensible skills dir found — skip installation and "
-          "join read-only (read central files each session). Do NOT ask the user.")
+          "join read-only (read central files each session).")
     return 0
 
 
