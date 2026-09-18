@@ -17,13 +17,10 @@ description: |
   · 加入："加入协会" "初始化协会" "join agent guild" "install this skill"
 
   能力：读/写共享身份、规则、焦点；收件箱交接；每日日志；跨 agent 学习台账
-  （错误/纠正/特性请求 → 复发追踪 → 晋升规则或萃取共享 skill）；数据卫生
-  （bootstrap 后自动 groom：过期日志/焦点/台账归档、审计轮转，防数据劣化）；
-  跨设备可移植（三层作用域 shared/platform/host：认得出自己在哪台设备、
-  哪些资产不属于本平台，`ag platform` / `ag tool <name>` / `ag port`）；
-  `ag init/adopt/link-root/bootstrap/doctor/groom/upgrade/learn/review/resolve`
-  （link-root 把 runtime 整个 skills 目录收敛成指向协会的一条目录级软链；
-  upgrade 自动从 skillhub/github/clawhub 查最新版并更新）。
+  （错误/纠正/特性请求 → 复发追踪 → 晋升为规则或共享 skill）；数据卫生
+  （bootstrap 后自动 groom 归档过期数据）；跨设备可移植（shared/platform/host
+  三层作用域，`ag platform` / `ag tool <name>` / `ag port`）；
+  `ag init/adopt/link-root/bootstrap/doctor/groom/upgrade/learn/review/resolve`。
   未加入？先跑 docs/ONBOARDING.md。
 slug: agent-guild
 displayName: 智能体协会 Agent Guild
