@@ -16,11 +16,13 @@ description: |
     "这个工具在哪" "cross-device" "another machine" "which platform"
   · 加入："加入协会" "初始化协会" "join agent guild" "install this skill"
 
-  能力：读/写共享身份、规则、焦点；收件箱交接；每日日志；跨 agent 学习台账
+  能力：读/写共享身份、规则、焦点；收件箱交接；每日日志；会话闭环
+  （`ag recall` 检索共享记忆 / `ag finish` 收尾沉淀，3.9.0+）；并发追加
+  咨询锁防丢写；跨 agent 学习台账
   （错误/纠正/特性请求 → 复发追踪 → 晋升为规则或共享 skill）；数据卫生
   （bootstrap 后自动 groom 归档过期数据）；跨设备可移植（shared/platform/host
   三层作用域，`ag platform` / `ag tool <name>` / `ag port`）；
-  `ag init/adopt/link-root/bootstrap/doctor/groom/upgrade/learn/review/resolve`。
+  `ag init/adopt/link-root/bootstrap/recall/finish/doctor/groom/upgrade/learn/review/resolve`。
   未加入？先跑 docs/ONBOARDING.md。
 slug: agent-guild
 displayName: 智能体协会 Agent Guild
@@ -31,7 +33,7 @@ description_en: Cross-agent shared memory protocol — one identity, rules and m
 author: dqsjqian
 category: productivity
 protocol_version: "3.3"
-version: "3.8.2"
+version: "3.9.0"
 platforms: ["macos", "windows", "linux", "android", "ios"]
 license: MIT
 homepage: https://github.com/dqsjqian/agent-guild
@@ -104,6 +106,13 @@ python3 <SKILL_DIR>/scripts/ag.py bootstrap <your-agent-name>
 
 读到什么就按什么做。**没读就动手 = 违反协议。** 之后按需再读 `toolchain/*.md`、其他 `rules/*.md`。
 
+**长记忆靠 `recall`，不靠脑补**：bootstrap 只给常驻上下文（画像/戒律/项目/焦点）。
+历史教训、共享事实、往期决策都在 `memory/shared/` 与 daily log 里 ——
+会话中碰到"之前怎么定的 / 有没有踩过这坑"，先 `ag recall <关键词>`
+（grep 全 shared memory：identity/rules/projects/memory/handoff/log/learnings，
+AND 语义、`--all` 变 OR、`--limit N` 截断、无命中 exit 1），读到原文再引用，
+**不要凭印象转述旧结论**。`memory/shared/INDEX.md` 是共享事实的目录，可整读。
+
 ### M2 — Write memory after substantive work
 
 完成**实质工作**后 MUST 追加 daily log（见 Capability 4）。满足任一即"实质工作"：
@@ -111,7 +120,18 @@ python3 <SKILL_DIR>/scripts/ag.py bootstrap <your-agent-name>
 
 **跳过**：寒暄、简单查询、短问答、纯检索。
 
-跨 agent 有价值的事实 → 也写 `memory/shared/`；只对你自己有意义的 → 留在 `memory/<你的名字>/`。
+**收尾一条命令**（3.9.0+）：
+
+```bash
+echo "<本次做了什么/结论/下一步>" | ag finish <你的名字>
+```
+
+`ag finish` = 摘要写进当天 daily log + 刷新 last_seen + 报告未处理收件箱
+（加 `--archive-inbox` 一并归档已处理消息）。写完**回读输出里的文件路径**，
+确认落盘。没有新事实时允许 no-op（说明理由），不要为写而写、把日记当流水账。
+
+跨 agent 有价值的事实 → 也写 `memory/shared/`（新建主题文件时同步登记
+`INDEX.md`）；只对你自己有意义的 → 留在 `memory/<你的名字>/`。
 
 **踩坑/被纠正/发现更好做法 → 同时记学习台账**（Capability 8，`ag learn`）。
 用户纠正了你・命令非预期失败・用户想要不存在的能力・发现某任务更优解 ——
@@ -164,13 +184,20 @@ onboarding from the top.
 ## The `ag` CLI — use it for all writes
 
 Writes to shared files are atomic + audited when done through the CLI
-(zero-dependency Python, stdlib only). Reads stay plain file reads.
+(zero-dependency Python, stdlib only). Concurrent appends — two agents
+logging or filing a learning entry at the same moment — are serialized
+with an advisory lock, so neither entry can be lost. Reads stay plain
+file reads.
 
 ```bash
 AG="python3 <SKILL_DIR>/scripts/ag.py"
 
 $AG init <agent>                    # bootstrap the guild (idempotent)
 $AG bootstrap <agent>               # read ALL shared context in one shot
+$AG recall <kw> [...]               # grep shared memory (AND; --all = OR,
+                                    #   --limit N; exit 1 on no match)
+echo "<summary>" | $AG finish <agent>   # close out: daily log + last_seen +
+                                    #   inbox report (--archive-inbox to file)
 $AG platform                        # which device am I on? os/arch/host-id/links
 $AG tool <name>                     # resolve a tool's path HERE (exit 3 = not
                                     #   available on this platform + how to install)
@@ -199,7 +226,8 @@ $AG prune 30                        # list idle agents
 If the CLI is unavailable (no Python, sandboxed runtime), fall back to the
 manual file operations below — Edit in place, never Write-overwrite a shared
 file. Every capability in this skill is reachable by plain file reads/writes;
-the CLI only adds atomicity and an audit trail.
+the CLI only adds atomicity, append serialization (advisory lock), and an
+audit trail.
 
 ## Capability 1 — Read shared user context
 
@@ -233,6 +261,8 @@ Inbox: `~/.agent-guild/handoff/inbox/`.
 
 After **substantive work** (built/fixed/decided/learned a lasting fact), append to `~/.agent-guild/log/daily/YYYY-MM-DD-<your-agent-name>.md` — per-agent file, append-only. **Skip** greetings / lookups / short Q&A.
 
+首选 `ag finish`（自动定位当天文件 + last_seen + 收件箱报告）；也可 `ag log <agent> "<title>"` 手动追加。
+
 Good entry: `## <title>` + What / Why / Result / Cross-agent note (if others need to know).
 
 ## Capability 5 — Refresh last_seen
@@ -252,7 +282,9 @@ New skill / MCP / plugin / tool / persistent data you install → **MUST** go un
 | `~/.agent-guild/memory/<agent>/` | 该 agent 的私有记忆文件（`ag adopt` 搬进来后软链回原位，runtime 照常读写） |
 | `~/.agent-guild/memory/shared/` | 跨 agent 都该知道的事实（用户偏好、项目约定、踩过的坑） |
 
-写之前先读：别把别人已经记过的东西重复记一遍。
+写之前先读：别把别人已经记过的东西重复记一遍。新主题文件登记进
+`memory/shared/INDEX.md`（目录索引，bootstrap/recall 的入口）；查旧事用
+`ag recall <关键词>`，引用时给出文件路径。
 
 ## Capability 8 — Learning ledger (self-improvement loop)
 
@@ -286,6 +318,9 @@ audit 越滚越大、resolved 台账条目永远躺在 live 文件里。groom �
 
 - **自动触发**：`ag bootstrap` 尾部挂钩（速率限制默认 24h 一次），skill 正常
   触发即自动维护，无需用户点名。
+- **版本自检**（3.9.0+）：bootstrap 尾部同样速率限制地对比三平台发布版本；
+  默认 `check` 只提示，UPGRADE.md 里 `mode = apply` 则自动下载安装
+  （仅替换 skill 本体，用户数据分毫不动），`mode = off` 关闭。
 - **保真原则**：只搬不删 —— 过期数据进 `log/archive/`、
   `handoff/shared-state/archive/`、`learnings/archive/` 或可恢复的 `.trash/`；
   手写的、无时间戳的 focus 块永远不动；未读收件箱永远只报告不搬。
@@ -337,9 +372,9 @@ $AG port --apply      # 只做机械修复：host 状态归位、registry 按设
 
 | 敏感操作 | 干什么用 | 边界 |
 |---|---|---|
-| 网络请求 | 只有 `ag upgrade` 查版本 / 下载本 skill 自己的发布包 | 固定的公开版本接口 + 本项目 release 地址；请求不带任何本机数据；`--apply` 才下载 |
+| 网络请求 | `ag upgrade` 查版本 / 下载本 skill 自己的发布包；`ag bootstrap` 尾部的升级自检（3.9.0+，默认 24h 一次，UPGRADE.md 可调/可关） | 固定的公开版本接口 + 本项目 release 地址；请求不带任何本机数据；`--apply` 或 UPGRADE.md `mode=apply` 才下载，用户数据永不触碰 |
 | 创建进程 | 回收站工具（`trash` / `gio trash` / PowerShell）、Windows `mklink /J` | 固定白名单命令 + 参数数组，全程无 shell 拼接 |
-| 临时文件 | 原子写（写临时文件再 `os.replace`），探测本机能否建软链 | `tempfile`，用完即清 |
+| 临时文件 | 原子写（写临时文件再 `os.replace`），探测本机能否建软链；并发追加用 sidecar `.ag-lock` 咨询锁串行化，防止同时写入丢条目 | `tempfile`，用完即清；锁文件不含数据，留在目标文件旁边 |
 | 读环境变量 | `AGENT_GUILD_DIR` / `AG_AGENT` / `AG_HOST_ID` / `AG_PLATFORM` 等配置与平台探测 | 不读任何凭据，读到的东西不出网 |
 | 删除文件 | 清理失效软链、轮转过期数据 | **从不硬删**：进系统回收站或 `~/.agent-guild/.trash/`；软链只解链不删目标 |
 | 写文件 / 移动复制 | 把散落资产收敛进协会、归档过期数据 | 默认 dry-run，`--apply` 才动；写入限于 `~/.agent-guild/`；搬完校验、失败回滚；凭据目录不参与 |

@@ -47,6 +47,7 @@ cp "$ROOT/SKILL.md"      "$PKG/SKILL.md"
 cp "$ROOT/manifest.json" "$PKG/manifest.json"
 cp "$ROOT/scripts/ag.py" "$PKG/scripts/ag.py"
 cp "$ROOT/scripts/test_junction.py" "$PKG/scripts/test_junction.py"
+cp "$ROOT/scripts/test_session.py" "$PKG/scripts/test_session.py"
 cp "$ROOT/scripts/install.sh"  "$PKG/scripts/install.sh"
 cp "$ROOT/scripts/install.ps1" "$PKG/scripts/install.ps1"
 

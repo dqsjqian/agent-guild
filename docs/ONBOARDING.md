@@ -85,7 +85,7 @@ iex "$AG bootstrap <me>"
 ### No shell / no Python (sandboxed or mobile runtime)
 
 Read these files directly at every session start — you still get the whole
-protocol, just without atomic writes:
+protocol, just without atomic writes and append locking:
 `~/.agent-guild/identity/profile.md`, `rules/universal.md`,
 `projects/active.md`, `handoff/shared-state/current-focus.md`.
 Register by hand-editing `registry.json` with `"install_tier": "readonly"`.

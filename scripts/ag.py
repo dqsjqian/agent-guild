@@ -21,6 +21,12 @@ Commands:
   adopt [agent]           Scan agent home for adoptable assets (DRY-RUN report)
   adopt --apply [agent]   Move assets into the guild + link back
   bootstrap               Print all shared context (identity/rules/projects/focus)
+  recall <kw> [...]       Search shared memory (identity/rules/projects/memory/
+                          handoff/logs/learnings) — AND by default; --all = OR,
+                          --limit N caps output (default 20); exit 1 if no hit
+  finish [agent]          Close a session: summary (stdin) -> today's daily log,
+                          last-seen refresh, inbox report
+                          opt: --archive-inbox  mv this agent's inbox -> archive/
   doctor                  Health check: broken links, stale paths, version drift
   platform                Identify THIS device: os / arch / host-id / link support
   tool <name>             Resolve a tool's executable for this platform (prints
@@ -31,6 +37,8 @@ Commands:
                           fold registry paths per device, declare tool platforms
   upgrade                 Check 3 platforms for a newer skill version (dry-run)
   upgrade --apply         Download + install the latest version, keep user data
+                          (bootstrap also self-checks once per UPGRADE.md
+                          interval; mode=apply there auto-installs)
   status                  List registered agents + last_seen
   register <agent> <home> <tier> [skills_root] [caps...]
   last-seen <agent>       Refresh an agent's presence
@@ -72,6 +80,7 @@ import tempfile
 import urllib.error
 import urllib.request
 import zipfile
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from fnmatch import fnmatch
 from pathlib import Path
@@ -389,6 +398,20 @@ PLACEHOLDERS = {
         "groom_interval_hours = 24  # auto-groom cooldown\n"
         "```\n"
     ),
+    "UPGRADE.md": (
+        "# Upgrade Policy\n\n"
+        "> `ag bootstrap` self-checks the published version once per interval\n"
+        "> (3.9.0+). Edit freely — applies on the next bootstrap. The check\n"
+        "> only reaches the public version endpoints; `apply` downloads from\n"
+        "> this project's GitHub releases and never touches user data.\n\n"
+        "```\n"
+        "mode = check              # check | apply | off\n"
+        "                          #   check: report an available update, do nothing\n"
+        "                          #   apply: download and install it automatically\n"
+        "                          #   off:   no self-check on bootstrap\n"
+        "interval_hours = 24       # self-check cooldown\n"
+        "```\n"
+    ),
 }
 
 # --------------------------------------------------------------- adoption ---
@@ -483,21 +506,55 @@ def atomic_write_json(path: Path, data) -> None:
         raise
 
 
-def atomic_append(path: Path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    body = path.read_text(encoding="utf-8") if path.exists() else ""
-    body = body.rstrip("\n") + "\n" + content.rstrip("\n") + "\n"
-    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".ag-", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(body)
-        os.replace(tmp, path)
-    except BaseException:
+def _session_path(path, write: bool = False) -> Path:
+    """Resolve a guild state path for the session protocol. Relative paths
+    land under the central dir (session data is guild-owned); `write`
+    pre-creates the parent directories."""
+    p = Path(path)
+    if not p.is_absolute():
+        p = CENTRAL / p
+    if write:
+        p.parent.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+@contextmanager
+def _append_lock(path: Path):
+    """Lock a sidecar file, not the inode that os.replace swaps out from
+    under us — keeps concurrent appends from losing each other."""
+    lock = path.with_name(f".{path.name}.ag-lock")
+    _session_path(lock, write=True)
+    with lock.open("a+b") as stream:
+        if os.name == "nt":
+            import msvcrt
+            stream.seek(0, os.SEEK_END)
+            if not stream.tell():
+                stream.write(b"0")
+                stream.flush()
+            stream.seek(0)
+            msvcrt.locking(stream.fileno(), msvcrt.LK_LOCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
         try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
+            yield
+        finally:
+            if os.name == "nt":
+                stream.seek(0)
+                msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+
+
+def atomic_append(path: Path, content: str) -> None:
+    with _append_lock(path):
+        _session_path(path, write=True)
+        body = path.read_text(encoding="utf-8") if path.exists() else ""
+        existing = body.rstrip("\n")
+        fresh = content.rstrip("\n")
+        # A brand-new target must not start with a stray blank line.
+        body = (existing + "\n" + fresh if existing else fresh) + "\n"
+        _atomic_write_text(path, body)
 
 
 def load_registry() -> dict:
@@ -1293,31 +1350,36 @@ def cmd_upgrade(args: list) -> int:
         return 0
 
     print("downloading ...")
+    ok, msg = _download_and_apply(latest)
+    print(f"  {msg}")
+    if not ok:
+        return 1
+    print("user data (identity/rules/log/handoff/skills_data/connectors/memory) untouched.")
+    return 0
+
+
+def _download_and_apply(latest: str) -> Tuple[bool, str]:
+    """Shared by `ag upgrade --apply` and the bootstrap auto-upgrade:
+    download the release zip and swap the skill package in. User data is
+    preserved (see _apply_skill_package). Returns (ok, message)."""
     try:
         data = _http_bytes(GITHUB_RELEASE_ZIP.format(ver=latest), timeout=120)
     except Exception as e:
-        print(f"download failed: {e}")
-        return 1
-
+        return False, f"download failed: {e}"
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as z:
             stage = Path(tempfile.mkdtemp(prefix="ag-upgrade-"))
             z.extractall(stage)
         pkg = stage / "agent-guild"
         if not (pkg / "SKILL.md").is_file():
-            print("apply failed: release zip has unexpected layout")
-            return 1
+            return False, "apply failed: release zip has unexpected layout"
         m = json.loads((pkg / "manifest.json").read_text(encoding="utf-8"))
         new_proto = m.get("protocol_version", PROTOCOL_VERSION)
         new_skill = m.get("skill_version", latest)
         _apply_skill_package(pkg, new_proto, new_skill)
+        return True, f"upgraded → {new_skill} (protocol {new_proto})"
     except Exception as e:
-        print(f"apply failed: {e}")
-        return 1
-
-    print(f"upgraded {local} → {new_skill} (protocol {new_proto}).")
-    print("user data (identity/rules/log/handoff/skills_data/connectors/memory) untouched.")
-    return 0
+        return False, f"apply failed: {e}"
 
 
 # ------------------------------------------------------------------ adopt ---
@@ -1593,10 +1655,157 @@ def cmd_bootstrap(args: list) -> int:
         print("  fix what you touch (ag resolve), promote what recurs (ag review).")
 
     print(f"\n{shown}/{len(BOOTSTRAP_FILES)} context files loaded.")
+    print("Mid-session: `ag recall <keyword>` searches shared memory; "
+          "close out with `ag finish` (summary via stdin).")
 
     # Data hygiene (protocol 3.2+): rate-limited auto-groom so the guild never
     # slowly rots. Prints only when something was found; never fails.
     maybe_auto_groom(agent)
+
+    # Upgrade self-check (3.9.0+): once per interval_hours, compare against
+    # the published version; mode=apply installs it. Policy: UPGRADE.md.
+    maybe_auto_upgrade(agent)
+    return 0
+
+
+# ------------------------------------------------------------------ recall ---
+
+# Shared-memory roots a recall query walks (read-only, *.md, recursive).
+# Host- and platform-scoped state, skills/, tools/ and registry internals
+# stay out: a memory query must not surface another device's install noise.
+RECALL_ROOTS = (
+    "identity", "rules", "projects", "memory",
+    "handoff/shared-state", "handoff/inbox", "handoff/archive",
+    "log/daily", "log/archive", "learnings",
+)
+
+
+def cmd_recall(args: list) -> int:
+    """Full-text search across shared memory (grep-style, read-only)."""
+    if not CENTRAL.exists():
+        print(f"{CENTRAL} missing — run `ag init` first", file=sys.stderr)
+        return 1
+    limit_raw = _opt(args, "--limit", "20")
+    try:
+        limit = max(1, int(limit_raw))
+    except ValueError:
+        print("--limit needs an integer", file=sys.stderr)
+        return 2
+    or_mode = "--all" in args
+    if or_mode:
+        args.remove("--all")
+    keywords = [a.lower() for a in args if a and not a.startswith("-")]
+    if not keywords:
+        print("usage: ag recall <keyword> [...] [--limit N] [--all]",
+              file=sys.stderr)
+        return 2
+
+    hits, done = 0, False
+    for root in RECALL_ROOTS:
+        if done:
+            break
+        d = _session_path(root)
+        if not d.is_dir():
+            continue
+        for p in sorted(d.rglob("*.md")):
+            if done:
+                break
+            try:
+                lines = p.read_text(encoding="utf-8", errors="ignore").splitlines()
+            except OSError:
+                continue
+            for no, line in enumerate(lines, 1):
+                low = line.lower()
+                hit = any(k in low for k in keywords) if or_mode \
+                    else all(k in low for k in keywords)
+                if hit:
+                    print(f"{p.relative_to(CENTRAL)}:{no}: {line.strip()}")
+                    hits += 1
+                    if hits >= limit:
+                        done = True
+                        break
+    if not hits:
+        print(f"no matches for: {' '.join(keywords)}")
+        return 1
+    print(f"\n{hits} match(es) in shared memory (limit {limit})")
+    return 0
+
+
+# ------------------------------------------------------------------ finish ---
+
+def _daily_log_path(agent: str) -> Path:
+    """Today's daily-log file for agent. One device: the historical name.
+    Several devices: suffix with the host-id, so two machines appending on
+    the same day cannot collide when the guild is carried between them."""
+    day = datetime.now().strftime("%Y-%m-%d")
+    path = DAILY / f"{day}-{agent}.md"
+    if len(known_hosts()) > 1 and not path.exists():
+        path = DAILY / f"{day}-{agent}.{host_id()}.md"
+    return path
+
+
+def _touch_last_seen(name: str) -> bool:
+    """Refresh an agent's presence stamps (shared + this device's block).
+    Returns False when the agent is not registered — caller decides whether
+    that is fatal."""
+    data = load_registry()
+    agents = data.setdefault("agents", {})
+    if name not in agents:
+        return False
+    hid, stamp = host_id(), now_iso()
+    entry = agents[name]
+    fold_entry_to_host(entry, hid)
+    entry.setdefault("hosts", {}).setdefault(hid, {})["last_seen"] = stamp
+    entry["last_seen"] = stamp
+    entry["mirror_host"] = hid
+    save_registry(data, name, "last_seen")
+    return True
+
+
+def cmd_finish(args: list) -> int:
+    """Close a session: summary (stdin) -> daily log, presence refresh,
+    inbox report / archive."""
+    archive_inbox = "--archive-inbox" in args
+    if archive_inbox:
+        args.remove("--archive-inbox")
+    agent = default_agent(args)
+    body = read_stdin()
+    if not body:
+        print("usage: ag finish [agent] [--archive-inbox]  (summary from stdin)",
+              file=sys.stderr)
+        return 2
+    if not CENTRAL.exists():
+        print(f"{CENTRAL} missing — run `ag init` first", file=sys.stderr)
+        return 1
+
+    # 1) session summary -> today's daily log (lock-protected atomic append)
+    path = _daily_log_path(agent)
+    atomic_append(path, f"\n## Session summary — {now_iso()} by {agent}\n\n{body}\n")
+
+    # 2) presence: the same refresh `ag last-seen` does, never fatal here
+    if not _touch_last_seen(agent):
+        print(f"note: agent '{agent}' not registered — last_seen not refreshed")
+
+    # 3) inbox: report pending, or archive what this agent has now processed
+    #    (SPEC 3.6: recipient moves a handled message to handoff/archive/)
+    mine = []
+    if INBOX.is_dir():
+        mine = [f for f in sorted(INBOX.iterdir())
+                if f.is_file() and f"-to-{agent}-" in f.name]
+    archived = 0
+    if mine and archive_inbox:
+        archive_dir = _session_path("handoff/archive", write=True)
+        for f in mine:
+            shutil.move(str(f), str(archive_dir / f.name))
+        archived = len(mine)
+        print(f"archived {archived} inbox message(s) -> handoff/archive/")
+    elif mine:
+        print(f"{len(mine)} inbox message(s) still pending — process them, "
+              f"then re-run with --archive-inbox")
+
+    audit("finish", {"agent": agent, "log": f"log/daily/{path.name}",
+                     "archived_inbox": archived})
+    print(f"session closed for {agent} — summary in log/daily/{path.name}")
     return 0
 
 
@@ -2429,19 +2638,10 @@ def cmd_last_seen(args: list) -> int:
         print("usage: ag last-seen <agent>", file=sys.stderr)
         return 2
     name = args[0]
-    data = load_registry()
-    agents = data.setdefault("agents", {})
-    if name not in agents:
+    if not _touch_last_seen(name):
         print(f"agent '{name}' not registered — run: ag register {name} <home> <tier>", file=sys.stderr)
         return 1
-    hid, stamp = host_id(), now_iso()
-    entry = agents[name]
-    fold_entry_to_host(entry, hid)
-    entry.setdefault("hosts", {}).setdefault(hid, {})["last_seen"] = stamp
-    entry["last_seen"] = stamp
-    entry["mirror_host"] = hid
-    save_registry(data, name, "last_seen")
-    print(f"{name} last_seen updated (host={hid})")
+    print(f"{name} last_seen updated (host={host_id()})")
     return 0
 
 
@@ -2472,13 +2672,7 @@ def cmd_log(args: list) -> int:
     if not body:
         print("empty log body", file=sys.stderr)
         return 2
-    day = datetime.now().strftime("%Y-%m-%d")
-    # One device: keep the historical name. Several devices: suffix with the
-    # host-id, so two machines appending on the same day cannot collide when
-    # the guild is carried between them.
-    path = DAILY / f"{day}-{agent}.md"
-    if len(known_hosts()) > 1 and not path.exists():
-        path = DAILY / f"{day}-{agent}.{host_id()}.md"
+    path = _daily_log_path(agent)
     atomic_append(path, f"\n## {title}\n\n{body}")
     print(f"appended to log/daily/{path.name}")
     return 0
@@ -3051,6 +3245,105 @@ def maybe_auto_groom(agent: str) -> None:
         print(f"  (auto-groom skipped: {e})")
 
 
+# ------------------------------------------------- upgrade self-check (3.9) ---
+
+UPGRADE = CENTRAL / "UPGRADE.md"
+
+UPGRADE_DEFAULTS = {
+    "mode": "check",        # check | apply | off
+    "interval_hours": 24,
+}
+
+
+def load_upgrade_config() -> dict:
+    """UPGRADE.md `key = value` lines override the defaults — same parsing
+    convention as RETENTION.md. mode is a string, interval_hours an int;
+    anything unparseable falls back silently."""
+    out = dict(UPGRADE_DEFAULTS)
+    if not UPGRADE.is_file():
+        return out
+    for line in UPGRADE.read_text(encoding="utf-8", errors="ignore").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, _, v = line.partition("=")
+        k, v = k.strip(), v.strip().split("#", 1)[0].strip().lower()
+        if k == "mode" and v in ("check", "apply", "off"):
+            out["mode"] = v
+        elif k == "interval_hours":
+            try:
+                out["interval_hours"] = max(1, int(v))
+            except ValueError:
+                pass
+    return out
+
+
+def _upgrade_state(read_only: bool = False) -> Path:
+    """Upgrade bookkeeping is per device, exactly like groom state."""
+    return host_state("upgrade.json") if read_only \
+        else host_dir(create=True) / "upgrade.json"
+
+
+def _upgrade_due(cfg: dict) -> bool:
+    state = _upgrade_state(read_only=True)
+    if not state.is_file():
+        return True
+    try:
+        last = json.loads(state.read_text(encoding="utf-8")).get("last_check", "")
+    except (json.JSONDecodeError, OSError):
+        return True
+    t = _parse_iso(last)
+    if not t:
+        return True
+    return (_now_epoch() - t.timestamp()) >= cfg["interval_hours"] * 3600
+
+
+def maybe_auto_upgrade(agent: str) -> None:
+    """Rate-limited upgrade self-check after bootstrap (3.9.0+). Compares the
+    installed version against the public registries once per interval_hours;
+    mode=apply installs the update automatically. NEVER fails bootstrap."""
+    try:
+        cfg = load_upgrade_config()
+        if cfg["mode"] == "off" or not _upgrade_due(cfg):
+            return
+        # Stamp BEFORE any network call: an offline machine must not retry
+        # the check on every bootstrap for a whole day.
+        atomic_write_json(_upgrade_state(), {
+            "host_id": host_id(),
+            "last_check": now_iso(),
+            "mode": cfg["mode"],
+        })
+        versions = {}
+        for _name, fetcher in (("skillhub", fetch_skillhub_version),
+                               ("github", fetch_github_version),
+                               ("clawhub", fetch_clawhub_version)):
+            try:
+                versions[_name] = fetcher()
+            except Exception:
+                pass  # one unreachable registry is not an error here
+        if not versions:
+            return  # offline / all registries unreachable — retried next interval
+        local = read_runtime_version().get("skill_version", "0")
+        latest = max(versions.values(), key=_verkey)
+        if not _version_gt(latest, local):
+            return
+        if cfg["mode"] == "apply":
+            ok, msg = _download_and_apply(latest)
+            audit("upgrade", {"agent": agent, "auto": True,
+                              "result": "ok" if ok else "failed", "version": latest})
+            print(f"\n== AUTO-UPGRADE ({local} → {latest}) ==")
+            print(f"  {'✓' if ok else '✗'} {msg}")
+            if ok:
+                print("  user data (identity/rules/log/handoff/skills_data/"
+                      "connectors/memory) untouched.")
+        else:
+            print(f"\nupdate available: {local} → {latest} "
+                  f"(bootstrap self-check, mode=check — set `mode = apply` in "
+                  f"UPGRADE.md to install automatically, or run `ag upgrade --apply`)")
+    except Exception as e:  # the self-check must never break bootstrap
+        print(f"  (auto-upgrade check skipped: {e})")
+
+
 def cmd_groom(args: list) -> int:
     """Data hygiene: archive expired logs/focus/ledgers, rotate the audit
     trail, trash stale archived messages, report degradation. Default applies;
@@ -3130,6 +3423,8 @@ def main() -> int:
         "link-root": cmd_link_root,
         "adopt": cmd_adopt,
         "bootstrap": cmd_bootstrap,
+        "recall": cmd_recall,
+        "finish": cmd_finish,
         "doctor": cmd_doctor,
         "platform": cmd_platform,
         "tool": cmd_tool,

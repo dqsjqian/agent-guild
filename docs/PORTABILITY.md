@@ -159,6 +159,7 @@ Anything rebuildable, secret, or strictly local:
 ```
 .trash/                 recoverable deletions, per machine
 connectors/             credentials — keep them out of any shared carrier
+**/.ag-lock             append-serialization locks, empty and per machine
 **/__pycache__/         rebuildable
 **/.venv/               rebuildable, platform-specific
 **/node_modules/        rebuildable, platform-specific
