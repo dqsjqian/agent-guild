@@ -53,7 +53,7 @@ cp "$ROOT/scripts/install.ps1" "$PKG/scripts/install.ps1"
 
 # Protocol docs. `ag init` seeds the root docs from either layout, so the
 # market package stays fully functional after install.
-for d in ONBOARDING CONVENTIONS SPEC LEARNINGS PORTABILITY SECURITY README README_EN; do
+for d in ONBOARDING CONVENTIONS SPEC LEARNINGS PORTABILITY SECURITY CAPABILITIES README README_EN; do
   cp "$ROOT/docs/$d.md" "$PKG/$DOCDIR/$d.md"
 done
 
@@ -73,7 +73,7 @@ if [ -n "${MARKET:-}" ]; then
   python3 - "$PKG/SKILL.md" <<'PY'
 import re, sys
 p = sys.argv[1]
-names = "ONBOARDING|CONVENTIONS|SPEC|LEARNINGS|PORTABILITY|SECURITY|README_EN|README"
+names = "ONBOARDING|CONVENTIONS|SPEC|LEARNINGS|PORTABILITY|SECURITY|CAPABILITIES|README_EN|README"
 body = open(p, encoding="utf-8").read()
 body, n = re.subn(rf"(?<![\w/])docs/({names})\.md", r"references/\1.md", body)
 open(p, "w", encoding="utf-8").write(body)
