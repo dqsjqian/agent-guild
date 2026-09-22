@@ -17,7 +17,7 @@ description: |
   能力：共享身份/规则/焦点读写；收件箱交接；每日日志；会话闭环
   （ag recall / ag finish）；并发锁防丢写；学习台账；自动 groom 归档；
   跨设备三层作用域（shared/platform/host）。
-  未加入？先跑 docs/ONBOARDING.md。
+  未加入？先跑 references/ONBOARDING.md。
 slug: agent-guild
 displayName: 智能体协会 Agent Guild
 display_name: 智能体协会 Agent Guild
@@ -27,7 +27,7 @@ description_en: Cross-agent shared memory protocol — one identity, rules and m
 author: dqsjqian
 category: productivity
 protocol_version: "3.3"
-version: "3.9.1"
+version: "3.10.0"
 platforms: ["macos", "windows", "linux", "android", "ios"]
 license: MIT
 homepage: https://github.com/dqsjqian/agent-guild
@@ -48,12 +48,12 @@ Python 3.9+ stdlib only. On Windows use `python` if `python3` is not on PATH.
 
 **Context budget note**: this file is the whole mandatory load (~6KB).
 Everything else is read-on-demand: full CLI reference + capability detail →
-`docs/CAPABILITIES.md`; join flow → `docs/ONBOARDING.md`.
+`references/CAPABILITIES.md`; join flow → `references/ONBOARDING.md`.
 
 ## Quick start (NOT joined yet)
 
 Run the onboarding flow: `~/.agent-guild/ONBOARDING.md` (or this skill's
-`docs/ONBOARDING.md`), then come back here — this file is your everyday
+`references/ONBOARDING.md`), then come back here — this file is your everyday
 capability.
 
 ## Mandatory Session Contract (once per session, MUST)
@@ -115,7 +115,7 @@ re-run onboarding from the top.
 Atomic + audited; concurrent appends serialized with an advisory lock (no
 lost entries). Reads stay plain file reads. Full command table incl.
 low-frequency ops (`register/send/log/focus/review/resolve/prune/audit/port`):
-**`docs/CAPABILITIES.md`**.
+**`references/CAPABILITIES.md`**.
 
 ```bash
 AG="python3 <SKILL_DIR>/scripts/ag.py"
@@ -134,7 +134,7 @@ Edit shared files in place, never Write-overwrite them.
 
 ## Capabilities at a glance
 
-Detail for every row: `docs/CAPABILITIES.md`.
+Detail for every row: `references/CAPABILITIES.md`.
 
 | # | Capability | One-liner |
 |---|---|---|
@@ -147,7 +147,7 @@ Detail for every row: `docs/CAPABILITIES.md`.
 | 7 | Cross-agent memory | `memory/<agent>/` private; `memory/shared/` + `INDEX.md` |
 | 8 | Learning ledger | `learnings/{LEARNINGS,ERRORS,FEATURE_REQUESTS}.md`; promotes to rules/skills |
 | 9 | Data hygiene | `ag groom` auto after bootstrap (rate-limited); moves, never deletes |
-| 10 | Cross-device | shared/platform/host scoping; `docs/PORTABILITY.md` |
+| 10 | Cross-device | shared/platform/host scoping; `references/PORTABILITY.md` |
 
 Cross-device hard rules (Capability 10): tool paths only via `ag tool`; no
 machine-absolute paths in shared files (→ `hosts/<host-id>/host-notes.md`);
@@ -159,14 +159,14 @@ relative); platform-specific skills declare `"platforms"` in manifest.
 Zero-dependency Python CLI + Markdown/JSON, all data local. Network use is
 limited to its own release-version self-check; deletions go to trash; every
 sensitive operation is whitelisted and audited. Full mapping:
-`docs/SECURITY.md`.
+`references/SECURITY.md`.
 
 ## Spec
 
-Manifest: `manifest.json` · Onboarding: `docs/ONBOARDING.md` · Conventions:
-`docs/CONVENTIONS.md` · Capabilities: `docs/CAPABILITIES.md` · Learnings:
-`docs/LEARNINGS.md` · Portability: `docs/PORTABILITY.md` · Security:
-`docs/SECURITY.md` · Repository: https://github.com/dqsjqian/agent-guild
+Manifest: `manifest.json` · Onboarding: `references/ONBOARDING.md` · Conventions:
+`references/CONVENTIONS.md` · Capabilities: `references/CAPABILITIES.md` · Learnings:
+`references/LEARNINGS.md` · Portability: `references/PORTABILITY.md` · Security:
+`references/SECURITY.md` · Repository: https://github.com/dqsjqian/agent-guild
 
 ## Failure modes
 

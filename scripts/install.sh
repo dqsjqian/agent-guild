@@ -40,16 +40,16 @@ REPO_RAW_URL="${AGENT_GUILD_REPO:-https://raw.githubusercontent.com/dqsjqian/age
   # Protocol skeleton (always overwrite — controlled by this project)
   # Docs go BOTH to the central root (user-facing entry points) and into the
   # skill package (so `ag init` can re-seed the root docs from skills/<pkg>/docs).
-  curl -fsSL "$REPO_RAW_URL/docs/ONBOARDING.md"                         -o "$CENTRAL/ONBOARDING.md"
-  curl -fsSL "$REPO_RAW_URL/docs/CONVENTIONS.md"                        -o "$CENTRAL/CONVENTIONS.md"
-  curl -fsSL "$REPO_RAW_URL/docs/SPEC.md"                               -o "$CENTRAL/SPEC.md"
-  curl -fsSL "$REPO_RAW_URL/docs/PORTABILITY.md"                        -o "$CENTRAL/PORTABILITY.md"
-  curl -fsSL "$REPO_RAW_URL/docs/ONBOARDING.md"  -o "$CENTRAL/skills/agent-guild/docs/ONBOARDING.md"
-  curl -fsSL "$REPO_RAW_URL/docs/CONVENTIONS.md" -o "$CENTRAL/skills/agent-guild/docs/CONVENTIONS.md"
-  curl -fsSL "$REPO_RAW_URL/docs/SPEC.md"        -o "$CENTRAL/skills/agent-guild/docs/SPEC.md"
-  curl -fsSL "$REPO_RAW_URL/docs/PORTABILITY.md" -o "$CENTRAL/skills/agent-guild/docs/PORTABILITY.md"
-  curl -fsSL "$REPO_RAW_URL/docs/README.md"      -o "$CENTRAL/skills/agent-guild/docs/README.md"
-  curl -fsSL "$REPO_RAW_URL/docs/README_EN.md"   -o "$CENTRAL/skills/agent-guild/docs/README_EN.md"
+  curl -fsSL "$REPO_RAW_URL/references/ONBOARDING.md"                         -o "$CENTRAL/ONBOARDING.md"
+  curl -fsSL "$REPO_RAW_URL/references/CONVENTIONS.md"                        -o "$CENTRAL/CONVENTIONS.md"
+  curl -fsSL "$REPO_RAW_URL/references/SPEC.md"                               -o "$CENTRAL/SPEC.md"
+  curl -fsSL "$REPO_RAW_URL/references/PORTABILITY.md"                        -o "$CENTRAL/PORTABILITY.md"
+  curl -fsSL "$REPO_RAW_URL/references/ONBOARDING.md"  -o "$CENTRAL/skills/agent-guild/references/ONBOARDING.md"
+  curl -fsSL "$REPO_RAW_URL/references/CONVENTIONS.md" -o "$CENTRAL/skills/agent-guild/references/CONVENTIONS.md"
+  curl -fsSL "$REPO_RAW_URL/references/SPEC.md"        -o "$CENTRAL/skills/agent-guild/references/SPEC.md"
+  curl -fsSL "$REPO_RAW_URL/references/PORTABILITY.md" -o "$CENTRAL/skills/agent-guild/references/PORTABILITY.md"
+  curl -fsSL "$REPO_RAW_URL/references/README.md"      -o "$CENTRAL/skills/agent-guild/references/README.md"
+  curl -fsSL "$REPO_RAW_URL/references/README_EN.md"   -o "$CENTRAL/skills/agent-guild/references/README_EN.md"
   curl -fsSL "$REPO_RAW_URL/SKILL.md"         -o "$CENTRAL/skills/agent-guild/SKILL.md"
   curl -fsSL "$REPO_RAW_URL/manifest.json"    -o "$CENTRAL/skills/agent-guild/manifest.json"
   curl -fsSL "$REPO_RAW_URL/scripts/ag.py"                         -o "$CENTRAL/skills/agent-guild/scripts/ag.py"
@@ -64,13 +64,13 @@ REPO_RAW_URL="${AGENT_GUILD_REPO:-https://raw.githubusercontent.com/dqsjqian/age
     [ -f "$target" ] && return 0
     curl -fsSL "$url" -o "$target" 2>/dev/null || true
   }
-  seed_if_missing "$CENTRAL/identity/profile.md"   "$REPO_RAW_URL/docs/examples/identity-profile.template.md"
-  seed_if_missing "$CENTRAL/identity/ROUTINE.md"   "$REPO_RAW_URL/docs/examples/identity-routine.template.md"
-  seed_if_missing "$CENTRAL/rules/universal.md"    "$REPO_RAW_URL/docs/examples/rules-universal.template.md"
-  seed_if_missing "$CENTRAL/rules/public-repo.md"  "$REPO_RAW_URL/docs/examples/rules-public-repo.template.md"
-  seed_if_missing "$CENTRAL/rules/file-cleanup.md" "$REPO_RAW_URL/docs/examples/rules-file-cleanup.template.md"
-  seed_if_missing "$CENTRAL/rules/safety.md"       "$REPO_RAW_URL/docs/examples/rules-safety.template.md"
-  seed_if_missing "$CENTRAL/toolchain/paths.md"    "$REPO_RAW_URL/docs/examples/toolchain-paths.template.md"
+  seed_if_missing "$CENTRAL/identity/profile.md"   "$REPO_RAW_URL/references/examples/identity-profile.template.md"
+  seed_if_missing "$CENTRAL/identity/ROUTINE.md"   "$REPO_RAW_URL/references/examples/identity-routine.template.md"
+  seed_if_missing "$CENTRAL/rules/universal.md"    "$REPO_RAW_URL/references/examples/rules-universal.template.md"
+  seed_if_missing "$CENTRAL/rules/public-repo.md"  "$REPO_RAW_URL/references/examples/rules-public-repo.template.md"
+  seed_if_missing "$CENTRAL/rules/file-cleanup.md" "$REPO_RAW_URL/references/examples/rules-file-cleanup.template.md"
+  seed_if_missing "$CENTRAL/rules/safety.md"       "$REPO_RAW_URL/references/examples/rules-safety.template.md"
+  seed_if_missing "$CENTRAL/toolchain/paths.md"    "$REPO_RAW_URL/references/examples/toolchain-paths.template.md"
 
   # Initial state files
   if [ ! -f "$CENTRAL/handoff/shared-state/current-focus.md" ]; then

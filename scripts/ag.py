@@ -126,9 +126,9 @@ HOST_NOTES = "host-notes.md"
 PROTOCOL_DOCS = ("ONBOARDING.md", "CONVENTIONS.md", "SPEC.md", "PORTABILITY.md")
 
 # Where those docs may sit inside a skill package. Registries differ on the
-# sanctioned layout: some take `docs/`, others only allow references/ scripts/
+# sanctioned layout: some take `references/`, others only allow references/ scripts/
 # templates/. Both are accepted so one package works everywhere.
-DOC_DIRS = ("docs", "references")
+DOC_DIRS = ("references", "docs")  # docs = legacy layouts pre-3.10
 
 # Canonical OS tags. Anything unrecognised degrades to a sanitized
 # platform.system() value instead of being guessed into the wrong family.
@@ -334,7 +334,7 @@ RETENTION_DEFAULTS = {
 # Download source for upgrades — our own GitHub release zip (most stable).
 GITHUB_RELEASE_ZIP = (
     "https://github.com/dqsjqian/agent-guild/releases/download/"
-    "v{ver}/agent-guild-skill-v{ver}.zip"
+    "v{ver}/agent-guild-v{ver}.zip"
 )
 
 # ---------------------------------------------------------------- skeleton ---
@@ -1187,7 +1187,7 @@ def cmd_init(args: list) -> int:
 
     # Seed / refresh the root protocol docs. First run seeds them; an upgrade
     # follows the version; when already current they are left alone.
-    # Docs are looked up in both layouts a registry may require: `docs/` as in
+    # Docs are looked up in both layouts a registry may require: `references/` as in
     # the repository, and `references/` as used by hosts that only sanction
     # references/ scripts/ templates/ inside a skill package.
     for doc in PROTOCOL_DOCS:
@@ -2927,7 +2927,7 @@ def cmd_review(args: list) -> int:
                       f"{hits} hits by {len(agents)} agents "
                       f"({', '.join(sorted(a or '?' for a in agents))})")
                 print(f"    -> distill into rules/ / toolchain/ / memory/shared/, "
-                      f"or extract a skill onto skills/ (docs/LEARNINGS.md)")
+                      f"or extract a skill onto skills/ (references/LEARNINGS.md)")
         print()
 
     if not any_file:

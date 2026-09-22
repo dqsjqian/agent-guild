@@ -108,7 +108,7 @@ Directory-symlink runtimes (`ag link-root`): new skills installed into
 
 三本跨 agent 台账在 `~/.agent-guild/learnings/`：`LEARNINGS.md`（纠正/知识盲区/最佳实践）·
 `ERRORS.md`（命令/集成失败）· `FEATURE_REQUESTS.md`（用户想要但不存在的能力）。
-完整规范（schema/触发词/晋升阈值/萃取流程）：`docs/LEARNINGS.md`（权威）。
+完整规范（schema/触发词/晋升阈值/萃取流程）：`references/LEARNINGS.md`（权威）。
 
 **触发速查**：
 
@@ -122,7 +122,7 @@ Directory-symlink runtimes (`ag link-root`): new skills installed into
 
 **复发追踪**：相同 `Pattern-Key` 的条目跨 agent 计数；`ag review` 报告达到阈值的组。
 
-**晋升**（达到阈值后 MUST，详见 docs/LEARNINGS.md）：
+**晋升**（达到阈值后 MUST，详见 references/LEARNINGS.md）：
 行为/偏好 → `rules/<topic>.md`；工具坑 → `toolchain/<tool>.md` 或 `memory/shared/`；
 通用可复用解法 → 萃取为 skill 放 `skills/<name>/`（共享 skill bus，全 agent 即刻可用），
 条目状态改 `promoted` / `promoted_to_skill`。
@@ -171,7 +171,7 @@ $AG port --apply      # 只做机械修复：host 状态归位、registry 按设
 用户换新设备时：把目录搬过去 → `ag init <agent>`（自动认领新 host-id）→
 `ag port` 看差异 → 按提示装缺的平台工具。老设备的数据一个字节都不用改。
 
-完整规则（四条硬规矩、迁移流程）：`docs/PORTABILITY.md`。
+完整规则（四条硬规矩、迁移流程）：`references/PORTABILITY.md`。
 
 ## What this skill does on your machine (capability disclosure)
 
@@ -189,7 +189,7 @@ $AG port --apply      # 只做机械修复：host 状态归位、registry 按设
 | 修改权限 | 安装脚本给本项目自己的 CLI 加可执行位 | 仅 `scripts/ag.py` 与 `scripts/install.sh` |
 | 采集系统信息 | 区分设备：OS / 架构 / 主机名 / 能否建软链 | 只写本机 `hosts/<host-id>/host.json`，不外传；`AG_HOST_ID` 可自定义替换主机名 |
 
-逐条对应源码位置、验证命令与"刻意不做的事"清单见 `docs/SECURITY.md`。
+逐条对应源码位置、验证命令与"刻意不做的事"清单见 `references/SECURITY.md`。
 本 skill 不要求任何 agent 隐藏行为、绕过宿主确认或提升权限。
 
 ## Failure modes

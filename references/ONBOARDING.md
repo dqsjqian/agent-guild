@@ -411,7 +411,7 @@ prefer it over hand-editing.
 one *device*, not the agent. A guild directory carried to another machine would
 otherwise look broken there. Run `ag platform` to get this device's `host-id`;
 anything that is only true here (local tool paths, what is installed) belongs
-in `hosts/<host-id>/host-notes.md`. Full rules: `docs/PORTABILITY.md`.
+in `hosts/<host-id>/host-notes.md`. Full rules: `references/PORTABILITY.md`.
 
 The `protocol_version` field on your entry is what the runtime skill uses to detect major version drift (see `skills/agent-guild/SKILL.md` § Self-check). Don't omit it.
 
@@ -479,7 +479,7 @@ The central directory has a **convention layer** of subdirectories that Agent Gu
 
    And when you need a tool's path, ask the CLI (`ag tool <name>`) instead of
    hardcoding one — it answers correctly per device, or tells you the tool is
-   not available here and how to install it. See `docs/PORTABILITY.md`.
+   not available here and how to install it. See `references/PORTABILITY.md`.
 
 ### Concrete examples
 

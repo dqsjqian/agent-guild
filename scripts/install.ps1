@@ -64,14 +64,14 @@ $null = & {
 
     # Docs go BOTH to the central root (user-facing entry points) and into the
     # skill package (so `ag init` can re-seed root docs from skills\<pkg>\docs).
-    Download-File "$RepoRawUrl/docs/ONBOARDING.md"                      (Join-Path $Central 'ONBOARDING.md')                          | Out-Null
-    Download-File "$RepoRawUrl/docs/CONVENTIONS.md"                     (Join-Path $Central 'CONVENTIONS.md')                         | Out-Null
-    Download-File "$RepoRawUrl/docs/SPEC.md"                            (Join-Path $Central 'SPEC.md')                                | Out-Null
-    Download-File "$RepoRawUrl/docs/PORTABILITY.md"                     (Join-Path $Central 'PORTABILITY.md')                         | Out-Null
-    Download-File "$RepoRawUrl/docs/ONBOARDING.md"  (Join-Path $Central 'skills\agent-guild\docs\ONBOARDING.md')  | Out-Null
-    Download-File "$RepoRawUrl/docs/CONVENTIONS.md" (Join-Path $Central 'skills\agent-guild\docs\CONVENTIONS.md') | Out-Null
-    Download-File "$RepoRawUrl/docs/SPEC.md"        (Join-Path $Central 'skills\agent-guild\docs\SPEC.md')        | Out-Null
-    Download-File "$RepoRawUrl/docs/PORTABILITY.md" (Join-Path $Central 'skills\agent-guild\docs\PORTABILITY.md') | Out-Null
+    Download-File "$RepoRawUrl/references/ONBOARDING.md"                      (Join-Path $Central 'ONBOARDING.md')                          | Out-Null
+    Download-File "$RepoRawUrl/references/CONVENTIONS.md"                     (Join-Path $Central 'CONVENTIONS.md')                         | Out-Null
+    Download-File "$RepoRawUrl/references/SPEC.md"                            (Join-Path $Central 'SPEC.md')                                | Out-Null
+    Download-File "$RepoRawUrl/references/PORTABILITY.md"                     (Join-Path $Central 'PORTABILITY.md')                         | Out-Null
+    Download-File "$RepoRawUrl/references/ONBOARDING.md"  (Join-Path $Central 'skills\agent-guild\docs\ONBOARDING.md')  | Out-Null
+    Download-File "$RepoRawUrl/references/CONVENTIONS.md" (Join-Path $Central 'skills\agent-guild\docs\CONVENTIONS.md') | Out-Null
+    Download-File "$RepoRawUrl/references/SPEC.md"        (Join-Path $Central 'skills\agent-guild\docs\SPEC.md')        | Out-Null
+    Download-File "$RepoRawUrl/references/PORTABILITY.md" (Join-Path $Central 'skills\agent-guild\docs\PORTABILITY.md') | Out-Null
     Download-File "$RepoRawUrl/SKILL.md"      (Join-Path $Central 'skills\agent-guild\SKILL.md')      | Out-Null
     Download-File "$RepoRawUrl/manifest.json" (Join-Path $Central 'skills\agent-guild\manifest.json') | Out-Null
     Download-File "$RepoRawUrl/scripts/ag.py" (Join-Path $Central 'skills\agent-guild\scripts\ag.py') | Out-Null
@@ -85,13 +85,13 @@ $null = & {
             Download-File $Url $Target | Out-Null
         }
     }
-    Seed-If-Missing (Join-Path $Central 'identity\profile.md')   "$RepoRawUrl/docs/examples/identity-profile.template.md"
-    Seed-If-Missing (Join-Path $Central 'identity\ROUTINE.md')   "$RepoRawUrl/docs/examples/identity-routine.template.md"
-    Seed-If-Missing (Join-Path $Central 'rules\universal.md')    "$RepoRawUrl/docs/examples/rules-universal.template.md"
-    Seed-If-Missing (Join-Path $Central 'rules\public-repo.md')  "$RepoRawUrl/docs/examples/rules-public-repo.template.md"
-    Seed-If-Missing (Join-Path $Central 'rules\file-cleanup.md') "$RepoRawUrl/docs/examples/rules-file-cleanup.template.md"
-    Seed-If-Missing (Join-Path $Central 'rules\safety.md')       "$RepoRawUrl/docs/examples/rules-safety.template.md"
-    Seed-If-Missing (Join-Path $Central 'toolchain\paths.md')    "$RepoRawUrl/docs/examples/toolchain-paths.template.md"
+    Seed-If-Missing (Join-Path $Central 'identity\profile.md')   "$RepoRawUrl/references/examples/identity-profile.template.md"
+    Seed-If-Missing (Join-Path $Central 'identity\ROUTINE.md')   "$RepoRawUrl/references/examples/identity-routine.template.md"
+    Seed-If-Missing (Join-Path $Central 'rules\universal.md')    "$RepoRawUrl/references/examples/rules-universal.template.md"
+    Seed-If-Missing (Join-Path $Central 'rules\public-repo.md')  "$RepoRawUrl/references/examples/rules-public-repo.template.md"
+    Seed-If-Missing (Join-Path $Central 'rules\file-cleanup.md') "$RepoRawUrl/references/examples/rules-file-cleanup.template.md"
+    Seed-If-Missing (Join-Path $Central 'rules\safety.md')       "$RepoRawUrl/references/examples/rules-safety.template.md"
+    Seed-If-Missing (Join-Path $Central 'toolchain\paths.md')    "$RepoRawUrl/references/examples/toolchain-paths.template.md"
 
     # Initial state files
     $focusFile = Join-Path $Central 'handoff\shared-state\current-focus.md'
@@ -135,5 +135,5 @@ $msg2 = $utf8.GetString([byte[]](0xEF,0xBC,0x88,0x50,0x6C,0x65,0x61,0x73,0x65,0x
 Write-Host ""
 Write-Host ("  " + $msg1 + $msg2)
 Write-Host ""
-Write-Host "  Read ~/.agent-guild/docs/ONBOARDING.md"
+Write-Host "  Read ~/.agent-guild/references/ONBOARDING.md"
 Write-Host ""

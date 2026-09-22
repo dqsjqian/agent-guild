@@ -2,13 +2,13 @@
   "$schema": "https://github.com/dqsjqian/agent-guild/raw/main/spec/manifest.schema.json",
   "name": "agent-guild",
   "protocol_version": "3.3",
-  "skill_version": "3.9.1",
-  "spec_url": "https://github.com/dqsjqian/agent-guild/blob/main/docs/SPEC.md",
-  "onboarding_url": "https://github.com/dqsjqian/agent-guild/blob/main/docs/ONBOARDING.md",
+  "skill_version": "3.10.0",
+  "spec_url": "https://github.com/dqsjqian/agent-guild/blob/main/references/SPEC.md",
+  "onboarding_url": "https://github.com/dqsjqian/agent-guild/blob/main/references/ONBOARDING.md",
   "skill_url": "https://github.com/dqsjqian/agent-guild/blob/main/SKILL.md",
-  "conventions_url": "https://github.com/dqsjqian/agent-guild/blob/main/docs/CONVENTIONS.md",
-  "portability_url": "https://github.com/dqsjqian/agent-guild/blob/main/docs/PORTABILITY.md",
-  "security_url": "https://github.com/dqsjqian/agent-guild/blob/main/docs/SECURITY.md",
+  "conventions_url": "https://github.com/dqsjqian/agent-guild/blob/main/references/CONVENTIONS.md",
+  "portability_url": "https://github.com/dqsjqian/agent-guild/blob/main/references/PORTABILITY.md",
+  "security_url": "https://github.com/dqsjqian/agent-guild/blob/main/references/SECURITY.md",
   "scripts": {
     "cli": "scripts/ag.py",
     "package": "scripts/package.sh"
@@ -23,7 +23,7 @@
       "projects/": "active projects",
       "handoff/": "shared-state + inbox + archive",
       "log/": "daily logs (per-agent) + decisions + archive",
-      "learnings/": "cross-agent self-improvement ledgers: LEARNINGS.md (corrections/gaps/best practices) + ERRORS.md (failures) + FEATURE_REQUESTS.md (missing capabilities) — see docs/LEARNINGS.md (protocol 3.1+)",
+      "learnings/": "cross-agent self-improvement ledgers: LEARNINGS.md (corrections/gaps/best practices) + ERRORS.md (failures) + FEATURE_REQUESTS.md (missing capabilities) — see references/LEARNINGS.md (protocol 3.1+)",
       "registry.json": "agent presence + install metadata",
       "ONBOARDING.md": "one-time joining flow",
       "CONVENTIONS.md": "default-on conventions (this file)",
@@ -42,9 +42,9 @@
     "_note_convention_layer": "Agent Guild does NOT read, write, validate, or interpret anything in the convention layer. It belongs entirely to the skills/MCPs/plugins/tools that own each subdirectory. Skills following this convention get free backup/sync semantics — when the user backs up ~/.agent-guild/, all participating skills come along."
   },
   "files": {
-    "onboarding_entry": "docs/ONBOARDING.md",
-    "conventions": "docs/CONVENTIONS.md",
-    "learning_ledger_spec": "docs/LEARNINGS.md",
+    "onboarding_entry": "references/ONBOARDING.md",
+    "conventions": "references/CONVENTIONS.md",
+    "learning_ledger_spec": "references/LEARNINGS.md",
     "skill_entry": "SKILL.md",
     "manifest": "manifest.json",
     "identity_profile": "identity/profile.md",
@@ -66,10 +66,10 @@
     "feature_requests_ledger": "learnings/FEATURE_REQUESTS.md",
     "learning_entry_id_pattern": "{LRN|ERR|FEAT}-{YYYY-MM-DD}-{XXX}",
     "inbox_pattern": "handoff/inbox/from-{src}-to-{dst}-{topic}.md",
-    "portability": "docs/PORTABILITY.md",
+    "portability": "references/PORTABILITY.md",
     "tool_manifest_pattern": "tools/{tool-name}/tool.json",
     "host_state_pattern": "hosts/{host-id}/{host.json,host-notes.md,VERSION,groom.json}",
-    "security": "docs/SECURITY.md"
+    "security": "references/SECURITY.md"
   },
   "lifecycle": {
     "_note": "Onboarding (one-time) and runtime (recurring) are deliberately decoupled. Agents read ONBOARDING.md exactly once when joining; afterwards the runtime SKILL.md handles all ongoing operations.",
@@ -224,7 +224,7 @@
     "where_to_put_connector_credentials": "Connector credentials (login cookies, API keys, OAuth tokens, lock files) MUST go under ~/.agent-guild/connectors/<connector-name>/, NOT skills_data/ — skills_data/ is for skill user data. connectors/ is manually placed, never auto-adopted, and gitignored by default so credentials stay local to the machine.",
     "naming": "Every subdirectory under skills/, skills_data/, and connectors/ MUST use a lowercase-hyphenated name ([a-z0-9-], e.g. qq-mail, agent-browser). No CJK characters, no spaces, no '-skill' suffix — the directory name is the identity, not a display label.",
     "privacy_layering": "If a skill writes mixed-sensitivity data, split into ~/.agent-guild/skills_data/<skill>/public/ vs .../private/ so users can apply different .gitignore policies (see CONVENTIONS.md).",
-    "device_scoped_facts": "Before persisting a fact, ask: would this still be true on another device? Yes -> shared files as usual. Only on the same OS+arch -> declare it per platform (tool.json / skill `platforms`). Only on this machine (absolute local paths, what is installed here) -> hosts/<host-id>/host-notes.md. See docs/PORTABILITY.md.",
+    "device_scoped_facts": "Before persisting a fact, ask: would this still be true on another device? Yes -> shared files as usual. Only on the same OS+arch -> declare it per platform (tool.json / skill `platforms`). Only on this machine (absolute local paths, what is installed here) -> hosts/<host-id>/host-notes.md. See references/PORTABILITY.md.",
     "link_direction": "The guild owns its payloads. A link from inside the guild to an external path is a violation — every other device sees a dangling link. Move the payload into the guild and link the old external path back in (`ag port --apply`). Links that stay inside the guild use relative targets."
   },
   "principles": [
@@ -255,7 +255,7 @@
     "ios"
   ],
   "capability_disclosure": {
-    "_note": "Every sensitive operation the CLI can perform, why it exists, and its boundary. Full detail with source locations in docs/SECURITY.md.",
+    "_note": "Every sensitive operation the CLI can perform, why it exists, and its boundary. Full detail with source locations in references/SECURITY.md.",
     "data_location": "All data stays in ~/.agent-guild/ on the user's machine. No telemetry, no analytics, no phone-home, no account, no daemon.",
     "network": "Only `ag upgrade`: version check against the public endpoints in VERSION_SOURCES, and downloading this project's own release archive under --apply. Requests carry no user data.",
     "process_creation": "OS trash helpers (trash / trash-put / gio trash), PowerShell Recycle Bin, and `cmd /c mklink /J` when symlinks need elevation. Fixed argument vectors, never a shell string.",
