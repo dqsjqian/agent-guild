@@ -17,7 +17,6 @@ description: |
   能力：共享身份/规则/焦点读写；收件箱交接；每日日志；会话闭环
   （ag recall / ag finish）；并发锁防丢写；学习台账；自动 groom 归档；
   跨设备三层作用域（shared/platform/host）。
-  未加入？先跑 references/ONBOARDING.md。
 slug: agent-guild
 displayName: 智能体协会 Agent Guild
 display_name: 智能体协会 Agent Guild
@@ -27,7 +26,7 @@ description_en: Cross-agent shared memory protocol — one identity, rules and m
 author: dqsjqian
 category: productivity
 protocol_version: "3.3"
-version: "3.10.0"
+version: "3.11.0"
 platforms: ["macos", "windows", "linux", "android", "ios"]
 license: MIT
 homepage: https://github.com/dqsjqian/agent-guild
@@ -46,69 +45,103 @@ agent_created: true
 `python3 <SKILL_DIR>/scripts/ag.py` (referred to as `ag`).
 Python 3.9+ stdlib only. On Windows use `python` if `python3` is not on PATH.
 
-**Context budget note**: this file is the whole mandatory load (~6KB).
-Everything else is read-on-demand: full CLI reference + capability detail →
-`references/CAPABILITIES.md`; join flow → `references/ONBOARDING.md`.
+## Quick verify — 30 seconds, copy-paste ready
 
-## Quick start (NOT joined yet)
+Three commands exercise the full loop (create guild → read context → write
+log). Run them as-is; `demo-agent` is just an example name, any kebab-case
+name works:
 
-Run the onboarding flow: `~/.agent-guild/ONBOARDING.md` (or this skill's
-`references/ONBOARDING.md`), then come back here — this file is your everyday
-capability.
+```bash
+AG="python3 $HOME/.agent-guild/skills/agent-guild/scripts/ag.py"
 
-## Mandatory Session Contract (once per session, MUST)
+$AG init demo-agent                                # 1. create the guild (idempotent)
+$AG bootstrap demo-agent                           # 2. read ALL shared context
+echo "first session: guild verified" | $AG finish demo-agent   # 3. write today's log
+```
 
-> 强制动作，本 skill 被触发时就执行一遍，不必等用户点名。All through `ag`,
-> one command each. No shell? Plain-file equivalents exist for every step —
-> read/edit the listed files directly; the contract still applies.
+Expected result: `init` prints the created directory layout, `bootstrap`
+prints identity/rules/projects/focus, `finish` prints the log file path
+(`log/daily/<date>-demo-agent.md`) — read that file back to confirm the
+write landed. Two more one-liners worth trying:
 
-**M0 — Ensure the guild exists**: `ag init <agent>` — idempotent; creates
-skeleton on first run, NEVER overwrites existing data.
+```bash
+$AG recall verified        # grep shared memory (exit 1 + "no matches" = empty guild, normal)
+$AG doctor                 # health check: links, paths, core files
+```
 
-**M1 — Read shared context BEFORE real work**: `ag bootstrap <agent>` — one
-shot: profile → routine → top rules → active projects → each agent's focus →
-your unread inbox. Output tells you which HOST you are on; platform-specific
-facts hang off that identity, don't borrow another machine's paths.
-Long memory = `ag recall <keywords>` (greps all shared memory), never repeat
-old conclusions from impression. `memory/shared/INDEX.md` is the shared-facts
-catalog.
+## Task routing — when the user asks for X, do this
 
-**M2 — Write memory after substantive work** (deliverable/code/config changed,
-decision made, bug root-caused, lasting fact learned. SKIP: greetings,
-lookups, short Q&A):
+| The user says… | What to run |
+|---|---|
+| "加入协会" / "join the guild" / "初始化" | `references/ONBOARDING.md` (one-time flow; fast path inside needs ~5 commands) |
+| "帮我记住 X" / "remember this" | `echo "X" \| $AG finish <your-agent-name>` — or write the fact into `~/.agent-guild/memory/shared/` and register it in `memory/shared/INDEX.md` |
+| "你记得吗 / 上次我们聊过 X" | `$AG recall <keyword> [<keyword> ...]` (AND search; `--all` = OR) |
+| "告诉其他 agent X" / "hand off" | write a file into `~/.agent-guild/handoff/inbox/` (naming: `YYYYMMDD-HHMM-from-<you>-to-<target>-topic.md`) |
+| "现在在做什么 / current focus" | read `~/.agent-guild/handoff/shared-state/current-focus.md` |
+| "整理协会 / groom / cleanup" | `$AG groom --dry-run` first (report only), then `$AG groom` to apply (moves to archive, never deletes) |
+| "这个工具在哪 / where is X" | `$AG tool <name>` (exit 3 = absent + install hint) |
+| "换个电脑怎么搬 / cross-device" | `$AG port --dry-run` → `references/PORTABILITY.md` |
 
-    echo "<summary>" | ag finish <agent>
+`<your-agent-name>` above = a short kebab-case name identifying the current
+agent (e.g. `workbuddy`, `claude`, `cursor`) — pick one and reuse it.
 
-= summary into today's daily log + last_seen refresh + inbox report. Read
-back the output path to confirm it landed. Cross-agent-valuable facts →
-`memory/shared/` (register in `INDEX.md`); self-only → `memory/<agent>/`.
-Pitfall / correction / better way found → also
-`ag learn <agent> learning|error|featreq "<summary>"`. Never log secrets;
-redact excerpts.
+## Session protocol — for agents on a joined machine
 
-**M3 — Route skills & data into the guild (default-on)**:
-- Preferred: `ag link-root <me> --apply` — your entire skills dir becomes ONE
-  directory symlink to `~/.agent-guild/skills/`; new guild skills appear
-  instantly, zero back-linking.
-- Fallback ladder: per-skill symlink → copy → readonly (ONBOARDING Step 3).
-- New skills → `~/.agent-guild/skills/<name>/`; persistent data →
-  `skills_data/<name>/` (sensitive → `private/`); MCP/plugins/CLIs → their
-  own dirs.
-- Sole exemption: runtime forces private paths → record the reason in registry.
+Once the guild exists on this machine, one pass through these steps per
+session keeps shared memory coherent. All through `ag`, one command each.
+No shell? Plain-file equivalents exist for every step — read/edit the listed
+files directly; the protocol still applies.
 
-**M4 — Self-audit (first join + monthly)**: `ag adopt <me>` dry-run report,
-`--apply` to actually move (auto-verify, auto-rollback on failure, trash not
-delete). Health check: `ag doctor`.
+- **Step 0 — ensure the guild exists**: `$AG init <name>` — idempotent;
+  creates the skeleton on first run, never overwrites existing data.
+- **Step 1 — read shared context before real work**: `$AG bootstrap <name>`
+  — one shot: profile → routine → top rules → active projects → each agent's
+  focus → your unread inbox. Output tells you which HOST you are on;
+  platform-specific facts hang off that identity, don't borrow another
+  machine's paths. Long memory = `$AG recall <keywords>` (greps all shared
+  memory), never repeat old conclusions from impression.
+  `memory/shared/INDEX.md` is the shared-facts catalog.
+- **Step 2 — write memory after substantive work** (deliverable/code/config
+  changed, decision made, bug root-caused, lasting fact learned. SKIP:
+  greetings, lookups, short Q&A):
+
+      echo "<summary>" | $AG finish <name>
+
+  = summary into today's daily log + last_seen refresh + inbox report. Read
+  back the output path to confirm it landed. Cross-agent-valuable facts →
+  `memory/shared/` (register in `INDEX.md`); self-only → `memory/<name>/`.
+  Pitfall / correction / better way found → also
+  `$AG learn <name> learning|error|featreq "<summary>"`. Never log secrets;
+  redact excerpts.
+- **Step 3 — route skills & data into the guild (default-on)**:
+  - Preferred: `$AG link-root <name>` — prints the plan first (dry-run);
+    review it, then add `--apply` to turn your entire skills dir into ONE
+    directory link to `~/.agent-guild/skills/`. New guild skills appear
+    instantly afterwards, zero back-linking.
+  - Fallback ladder: per-skill symlink → copy → readonly (ONBOARDING Step 3).
+  - New skills → `~/.agent-guild/skills/<name>/`; persistent data →
+    `skills_data/<name>/` (sensitive → `private/`); MCP/plugins/CLIs → their
+    own dirs.
+  - Sole exemption: runtime forces private paths → record the reason in
+    registry.
+- **Step 4 — self-audit (first join + monthly)**: `$AG adopt <name>` prints a
+  dry-run report; `--apply` moves files (auto-verify, auto-rollback on
+  failure, trash not delete). Health check: `$AG doctor`.
+
+First time on this machine, or the user asked to join? →
+`references/ONBOARDING.md` walks the full join flow, including where to
+install the skill inside your runtime and how to verify it triggers.
 
 ## Self-check (before real work)
 
 ```bash
-grep -q '"<your-agent-name>"' ~/.agent-guild/registry.json && echo registered
+grep -q '"demo-agent"' ~/.agent-guild/registry.json && echo registered
 grep -E '"protocol_version"' ~/.agent-guild/skills/agent-guild/manifest.json
 ```
 
-Not registered → run onboarding first. Central major version > yours →
-re-run onboarding from the top.
+Replace `demo-agent` with your own agent name. Not registered → run
+onboarding first. Central major version > yours → re-run onboarding from the
+top.
 
 ## The `ag` CLI — use it for all writes
 
@@ -118,11 +151,11 @@ low-frequency ops (`register/send/log/focus/review/resolve/prune/audit/port`):
 **`references/CAPABILITIES.md`**.
 
 ```bash
-AG="python3 <SKILL_DIR>/scripts/ag.py"
-$AG init <agent>                  # idempotent guild bootstrap
-$AG bootstrap <agent>             # read ALL shared context in one shot
+AG="python3 $HOME/.agent-guild/skills/agent-guild/scripts/ag.py"
+$AG init demo-agent               # idempotent guild bootstrap
+$AG bootstrap demo-agent          # read ALL shared context in one shot
 $AG recall <kw> [...]             # grep shared memory (AND; --all=OR; --limit N)
-echo "s" | $AG finish <agent>     # close out: daily log + last_seen + inbox
+echo "s" | $AG finish demo-agent  # close out: daily log + last_seen + inbox
 $AG platform                      # which device am I on?
 $AG tool <name>                   # tool path HERE (exit 3 = absent + install hint)
 $AG doctor                        # dangling links / stale paths / drift
@@ -157,8 +190,9 @@ relative); platform-specific skills declare `"platforms"` in manifest.
 ## Security disclosure
 
 Zero-dependency Python CLI + Markdown/JSON, all data local. Network use is
-limited to its own release-version self-check; deletions go to trash; every
-sensitive operation is whitelisted and audited. Full mapping:
+limited to its own release-version self-check (three fixed registry URLs,
+short timeout, failure is non-fatal); deletions go to trash; every sensitive
+operation is whitelisted and audited. Full mapping with source locations:
 `references/SECURITY.md`.
 
 ## Spec

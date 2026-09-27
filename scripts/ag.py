@@ -1234,7 +1234,7 @@ def _verkey(v: str) -> Tuple[int, ...]:
                  for seg in str(v).replace("-", ".").split("."))
 
 
-def _http_bytes(url: str, timeout: int = 12) -> bytes:
+def _http_bytes(url: str, timeout: int = 6) -> bytes:
     req = urllib.request.Request(url, headers={"User-Agent": "agent-guild"})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return r.read()
@@ -1268,7 +1268,7 @@ def fetch_github_version() -> str:
         "https://github.com/dqsjqian/agent-guild/releases/latest",
         headers={"User-Agent": "agent-guild"})
     try:
-        opener.open(req, timeout=12)
+        opener.open(req, timeout=6)
         raise LookupError("no redirect from releases/latest")
     except urllib.error.HTTPError as e:
         if e.code not in (301, 302, 303, 307, 308):
