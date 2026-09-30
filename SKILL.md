@@ -26,7 +26,7 @@ description_en: Cross-agent shared memory protocol — one identity, rules and m
 author: dqsjqian
 category: productivity
 protocol_version: "3.3"
-version: "3.11.0"
+version: "3.12.0"
 platforms: ["macos", "windows", "linux", "android", "ios"]
 license: MIT
 homepage: https://github.com/dqsjqian/agent-guild
