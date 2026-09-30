@@ -15,43 +15,115 @@
 
 ---
 
-## ⚡ FAST PATH — join in 5 steps (try this first)
+## Start with shared memory
 
-If you can run shell commands, you do not need to read the other ~470 lines.
+A request to "join" starts the shared-memory workflow. It does not authorize
+moving existing skills, tools, MCP configurations, or runtime memory. Start
+here unless the user has already selected the full shared-skills setup below.
+An existing choice remains valid; do not ask the user to approve it again.
+
 Replace `<me>` with your own agent name — whatever identifies you
 (`claude`, `cursor`, `copilot`, `aider`, `cline`, `continue`, `windsurf`,
 `gemini`, `workbuddy`, or anything else).
 
+Use the installed CLI below, or set `AG_SCRIPT` to `scripts/ag.py` in the
+skill package you are currently reading. That package can initialize a new
+guild; the central directory need not already exist.
+
+```bash
+# macOS / Linux / WSL / Git Bash / zsh
+AG_SCRIPT="$HOME/.agent-guild/skills/agent-guild/scripts/ag.py"
+ag() { python3 "$AG_SCRIPT" "$@"; }
+
+ag init <me>
+ag bootstrap <me> --no-maintenance
+printf '%s\n' "guild-check: shared context is reachable" | ag finish <me>
+ag recall guild-check
+```
+
+```powershell
+# Windows PowerShell
+$AG_SCRIPT = "$env:USERPROFILE\.agent-guild\skills\agent-guild\scripts\ag.py"
+python "$AG_SCRIPT" init <me>
+python "$AG_SCRIPT" bootstrap <me> --no-maintenance
+"guild-check: shared context is reachable" | python "$AG_SCRIPT" finish <me>
+python "$AG_SCRIPT" recall guild-check
+```
+
+Success means `recall` returns the saved line with its file path. A second
+agent with access to this same guild can run `recall guild-check` to verify
+the handoff of context. This verifies shared storage and retrieval; loading
+context in future conversations still requires the session protocol or a
+configured runtime hook.
+
+To keep using this mode, register through Step 5 with tier `readonly` and
+`skills_root = platform-managed`, using your actual runtime home (or the
+`platform-managed` sentinel when no runtime home is available). Here
+`readonly` describes the absence of a runtime skill installation, not a ban
+on authorized log or memory writes. An unregistered-agent notice from
+`finish` is expected during the trial. Existing working registrations need
+not change. Report the successful memory check without claiming a runtime
+skill trigger was verified.
+
+Without `--no-maintenance`, `bootstrap` also runs rate-limited local grooming and an online
+release-version check. `RETENTION.md` describes archive behavior;
+`UPGRADE.md` uses `mode = check` by default, `off` disables the online check,
+and `apply` opts into installing updates. Reading the context files directly
+does not run those maintenance hooks.
+
+If the user wants Agent Guild discoverable as a runtime skill, install only
+`agent-guild` using Step 3's per-skill link or copy tier, then verify it in
+Step 4. Whole-directory consolidation is a separate choice.
+
+## Full shared-skills setup — one-time, 6 steps
+
+Use this path when the user has selected sharing the whole skills directory.
+Every skill placed in the guild then becomes visible to runtimes using that
+directory link. Other agents' skill changes propagate immediately, and
+runtime-specific or host-wired items may require keeping per-skill links.
+
+First inspect the dry-run plans. `adopt` scans **skills, skills_data, MCP
+configurations, tools, and memory**, including runtime memory files at the
+agent home root; it excludes plugins and connector credential stores. The
+current CLI applies all eligible candidates, without a per-item selector.
+Proceed with `--apply` only when the user's request already covers the
+listed moves. If the report includes additional data outside that scope,
+keep the memory-only/per-skill setup working and resolve that scope before
+applying. Ask only when the existing request does not settle it.
+Steps 4–6 follow an applied installation; a dry-run alone does not establish
+the `dir-symlink` tier.
+
 ### macOS / Linux / WSL / Git Bash
 
 ```bash
-AG="python3 $HOME/.agent-guild/skills/agent-guild/scripts/ag.py"
+AG_SCRIPT="$HOME/.agent-guild/skills/agent-guild/scripts/ag.py"
+ag() { python3 "$AG_SCRIPT" "$@"; }
 
 # 1. Make sure the guild exists (idempotent — safe even if it already does)
-$AG init <me>
+ag init <me>
 
 # 2. Locate YOUR user-extensible skills dir — reads well-known paths only.
 #    SKILLS_ROOT=<path>  → link below
-#    SKILLS_ROOT=not-found → skip installation, join read-only (step 4)
-$AG find-root <me>
+#    SKILLS_ROOT=not-found → keep memory-only mode, skip to registration
+ag find-root <me>
 
-# 3. Consolidate: your whole skills dir becomes ONE directory link to the
-#    guild (~/.<me>/skills -> ~/.agent-guild/skills). Adoptable real skills
-#    block until you run `ag adopt <me> --apply`; foreign links move INTO
-#    the guild; nothing is ever deleted unrecoverably.
-$AG adopt <me> --apply     # move any real skills of yours into the guild
-$AG link-root <me> --apply # dry-run first: drop --apply to just see the plan
+# 3. Inspect the plans before any asset migration.
+ag adopt <me>
+ag link-root <me>
+# After checking that every planned move is within the selected scope:
+# ag adopt <me> --apply
+# ag link-root <me> --apply
 
 # 4. Prove your runtime can actually TRIGGER it (list/describe/invoke the skill).
 #    Files on disk ≠ success. If it does not trigger → per-skill links, copy,
 #    then read-only (Step 3 fallbacks).
 
-# 5. Register yourself (readonly tier if you had to skip installation)
-$AG register <me> "$HOME/.<me>/" dir-symlink "$HOME/.<me>/skills"
-#   no skills dir → $AG register <me> "$HOME/.<me>/" readonly platform-managed
+# 5. Register the actual discovered paths and resulting tier (Step 5).
+ag register <me> "<actual-runtime-home>" dir-symlink "<discovered-skills-root>"
+#   no skill installation → ag register <me> "<actual-runtime-home-or-platform-managed>" readonly platform-managed
 
 # 6. Load shared context (done)
-$AG bootstrap <me>
+ag bootstrap <me>
 ```
 
 > **Self-service by design.** Your own skills directory is something you can
@@ -61,25 +133,27 @@ $AG bootstrap <me>
 ### Windows (PowerShell 5.1+)
 
 ```powershell
-$AG = "python `"$env:USERPROFILE\.agent-guild\skills\agent-guild\scripts\ag.py`""
+$AG_SCRIPT = "$env:USERPROFILE\.agent-guild\skills\agent-guild\scripts\ag.py"
 
 # 1. Bootstrap (idempotent)
-iex "$AG init <me>"
+python "$AG_SCRIPT" init <me>
 
 # 2. Locate your skills dir (instant, never asks) — SKILLS_ROOT=not-found →
 #    skip installation, register readonly (below)
-iex "$AG find-root <me>"
+python "$AG_SCRIPT" find-root <me>
 
-# 3. Consolidate to ONE directory link (junction on Windows — no Dev Mode,
-#    no Admin needed). Adoptable real skills block until adopt --apply.
-iex "$AG adopt <me> --apply"
-iex "$AG link-root <me> --apply"   # dry-run first: drop --apply
+# 3. Inspect before consolidating (junction on Windows is supported).
+python "$AG_SCRIPT" adopt <me>
+python "$AG_SCRIPT" link-root <me>
+# After checking that every planned move is within the selected scope:
+# python "$AG_SCRIPT" adopt <me> --apply
+# python "$AG_SCRIPT" link-root <me> --apply
 
 # 4. Trigger test in your own runtime (same rule: triggerable = done)
 
 # 5-6. Register (readonly if no skills dir), then load context
-iex "$AG register <me> `"$env:USERPROFILE\.<me>\`" dir-symlink `"$env:USERPROFILE\.<me>\skills`""
-iex "$AG bootstrap <me>"
+python "$AG_SCRIPT" register <me> "<actual-runtime-home>" dir-symlink "<discovered-skills-root>"
+python "$AG_SCRIPT" bootstrap <me>
 ```
 
 ### No shell / no Python (sandboxed or mobile runtime)
@@ -92,7 +166,7 @@ Register by hand-editing `registry.json` with `"install_tier": "readonly"`.
 
 Then tell the user which tier you ended on and how you verified it.
 
-**Read the rest of this file only if**: the fast path failed, you can't find
+**Read the rest of this file only if**: the selected setup failed, you can't find
 your skills dir, your runtime refuses links, or you need the full rationale
 and fallback ladder.
 
@@ -104,7 +178,7 @@ This is the **one-time joining flow** for new agents. It tells you how to:
 
 1. Verify the central directory exists
 2. Discover where to install the skill in your runtime
-3. Install (dir-symlink → per-skill symlink → copy → readonly fallback)
+3. Install at the selected scope (Agent Guild only, or the full shared directory)
 4. Run a closed-loop trigger test
 5. Register your presence
 6. Hand off to the runtime skill for daily use
@@ -140,13 +214,17 @@ Get-ChildItem $env:USERPROFILE\.agent-guild   # Windows PowerShell
 
 You must see at least: `identity/  rules/  toolchain/  projects/  log/  handoff/  skills/  registry.json  ONBOARDING.md`
 
-If the directory is missing, the user has not run the installer yet. Tell them:
+If the directory is missing and the current skill package has `scripts/ag.py`,
+run `python3 <SKILL_DIR>/scripts/ag.py init <me>` (`python` on Windows).
+If the package is unavailable, use the installer within the user's requested
+setup scope:
 
-> "I need you to run the Agent Guild installer first:
->   - macOS/Linux: `curl -fsSL https://raw.githubusercontent.com/dqsjqian/agent-guild/main/install.sh | bash`
->   - Windows: `iwr -useb https://raw.githubusercontent.com/dqsjqian/agent-guild/main/install.ps1 | iex`"
+- macOS/Linux: `curl -fsSL https://raw.githubusercontent.com/dqsjqian/agent-guild/main/scripts/install.sh | bash`
+- Windows: `iwr -useb https://raw.githubusercontent.com/dqsjqian/agent-guild/main/scripts/install.ps1 | iex`
 
-Then stop. Re-run this onboarding after they've installed.
+Report a missing runtime prerequisite only if neither route can run; do not
+send the user through a separate installation step when the package can
+initialize itself.
 
 ---
 
@@ -235,19 +313,20 @@ Set `SKILLS_ROOT` to the user-extensible directory you discovered. The rest of S
 
 ---
 
-## Step 3 — Install (dir-symlink → per-skill symlink → copy → readonly)
+## Step 3 — Install within the selected scope
 
-> **One link, not one-per-skill.** The preferred shape is a SINGLE directory
-> link pointing your whole user-extensible skills dir at the guild's
-> `skills/`. Any skill the guild gains afterwards — including skills other
-> agents install — appears in your runtime with zero further action. The
-> per-skill pattern below is the fallback, not the goal.
+For Agent Guild alone, start with Tier 1b (per-skill link), then copy or
+memory-only mode. For the explicitly selected full shared-skills setup, start
+with Tier 1: one directory link makes all current and future guild skills
+visible in that runtime. Falling back may reduce the scope; it never expands
+the user's selected sharing scope.
 
-### Tier 1 — Directory symlink (preferred; `ag link-root` automates this)
+### Tier 1 — Directory symlink (full shared-skills mode; `ag link-root`)
 
 ```bash
 # Automated (classification report + safety checks; dry-run by default):
 python3 ~/.agent-guild/skills/agent-guild/scripts/ag.py link-root <me>
+# Once the plan is within the selected sharing scope:
 python3 ~/.agent-guild/skills/agent-guild/scripts/ag.py link-root <me> --apply
 
 # Equivalent manual commands — ONLY if your skills dir is empty/nonexistent:
@@ -267,13 +346,14 @@ cmd /c mklink /J "$SKILLS_ROOT" "$env:USERPROFILE\.agent-guild\skills"
 > `dir-symlink` — the tier name covers symlink and junction alike.
 
 What `ag link-root --apply` does (and never does):
-- links pointing into the guild → moved to trash (the directory link replaces them)
-- links pointing elsewhere (e.g. a source repo) → moved INTO `~/.agent-guild/skills/`
+- same-name links resolving to the same guild target → removed (the directory link replaces them)
+- links with no same-name guild entry → recreated in `~/.agent-guild/skills/` with their original target; aliases are preserved
+- same-name links resolving to different targets → **aborts** before changing items
 - real adoptable skills → **aborts** with "run `ag adopt <me> --apply` first"
 - host-wired / platform-managed items (`__skillhub`, `connector-*`, …) → **aborts**; per-skill tier is the correct mode for that runtime
 - never deletes anything unrecoverably, never replaces a non-empty dir, never touches an agent home
 
-### Tier 1b — Per-skill symlinks (fallback: runtime refuses directory links, or the skills dir also hosts host-wired items)
+### Tier 1b — Per-skill symlinks (Agent Guild only, or a full-mode fallback)
 
 ```bash
 # POSIX:
@@ -297,15 +377,19 @@ cp -R ~/.agent-guild/skills/agent-guild/. "$SKILLS_ROOT/agent-guild/"
 
 You'll need to re-sync on each session start (or on demand). See Step 6 for the update protocol.
 
-### Tier 3 — Read-only (last resort)
+### Tier 3 — Read-only installation (memory-only mode, also a fallback)
 
 If even copy fails (read-only skills dir, fully sandboxed runtime, no FS write), skip the local install. Just `cat ~/.agent-guild/skills/agent-guild/SKILL.md` at every conversation start. You won't appear in your own agent's skill list, but you can still follow the protocol.
 
+This tier can also be selected directly. Shared-memory use does not require
+exhausting installation attempts. Verify file access and the memory loop;
+record `install_verified = none` when no runtime trigger was tested.
+
 ---
 
-## Step 4 — Closed-loop trigger test (mandatory: install ≠ done)
+## Step 4 — Closed-loop trigger test (required for a runtime installation)
 
-> **Do not move on until you've actually triggered the skill in your own runtime — or exhausted all fallbacks and reported the failure honestly.** "Files are on disk" is not success. "I can call this skill in this very session" is success.
+> **For a runtime installation, verify the skill triggers before claiming it is installed successfully.** If the selected scope's fallbacks fail, report that honestly. Memory-only mode instead uses the saved-and-retrieved check at the top of this document.
 
 ### A. File-level sanity (cheap pre-check)
 
@@ -343,13 +427,22 @@ Pick the strongest available signal. Document which one you used in your final a
 Rollback before retrying:
 
 ```bash
-# Symlink-only: rm the link, never the target
-[ -L "$SKILLS_ROOT/agent-guild" ] && rm "$SKILLS_ROOT/agent-guild"
-# Copy: rm the directory you created (only if YOU created it)
-[ -d "$SKILLS_ROOT/agent-guild" ] && rm -rf "$SKILLS_ROOT/agent-guild"
+# Whole-directory link: remove only the root link itself.
+if [ -L "$SKILLS_ROOT" ]; then
+  unlink "$SKILLS_ROOT"
+# Per-skill link inside a real directory: remove only that link.
+elif [ -L "$SKILLS_ROOT/agent-guild" ]; then
+  unlink "$SKILLS_ROOT/agent-guild"
+fi
 ```
 
-Each retry: change exactly one variable (tier / target dir / manifest format) so you know which fix worked. The ladder is designed to be walked end to end before reporting back, so the user gets one clear outcome instead of a question per rung.
+Never remove `$SKILLS_ROOT/agent-guild` through a consolidated root: that
+path points into the shared guild. For a copied install, restore the prior
+backup or remove only the copy this setup created after verifying its path.
+For a Windows junction, remove the junction itself without recursive target
+deletion. Retain migrated payloads in the guild when changing install tiers.
+
+Each retry: change exactly one variable (tier / target dir / manifest format) so you know which fix worked. Walk the selected installation scope's fallback ladder autonomously; the memory-only path does not need a runtime trigger test.
 
 ### D. Honest failure report (only after exhausting C)
 
@@ -432,9 +525,10 @@ The only times you SHOULD come back to this onboarding file:
 
 ---
 
-## Step 6.5 — Where to install / put / use things going forward (default-on convention)
+## Step 6.5 — Where to put assets selected for sharing
 
-> This is a **lifestyle change**, not a one-time step. From now on, treat `~/.agent-guild/` as your default home for **anything** that should be:
+> Within the user's selected sharing scope, use `~/.agent-guild/` as the
+> default home for assets that should be:
 >
 > - Shared with other joined agents on this machine
 > - Backed up as a unit when the user moves machines
@@ -442,7 +536,13 @@ The only times you SHOULD come back to this onboarding file:
 
 The central directory has a **convention layer** of subdirectories that Agent Guild does NOT read or validate. They're there for skills, MCP servers, plugins, and shared tools to use voluntarily — and getting everyone to use the same locations is what gives the user a single, sane backup story.
 
-### The four shared layers
+Memory-only members can keep all existing skills and runtime data in place.
+Joining the guild or sharing a skill does not itself authorize importing
+unrelated memory, tool configuration, or sensitive persistent data. Use an
+existing user choice when it covers the action; inspect the plan and ask
+about scope only when it does not.
+
+### The five shared layers
 
 | Layer | Path | What goes here | Who can use it |
 |---|---|---|---|
@@ -454,11 +554,11 @@ The central directory has a **convention layer** of subdirectories that Agent Gu
 
 ### Three rules going forward (memorize these)
 
-1. **When installing a NEW skill / MCP / plugin / tool**: install it under the corresponding convention-layer directory above. Don't drop it under `~/.<some-agent>/` unless that agent's runtime *requires* a private location (rare). Prefer the shared, agent-neutral location.
+1. **When installing a NEW skill / MCP / plugin / tool selected for sharing**: install it under the corresponding convention-layer directory above. Keep agent-specific installations where the user or runtime expects them.
 
 2. **When USING an existing skill / MCP / plugin / tool**: look in `~/.agent-guild/{skills,mcp,plugins,tools}/` first. If it's there, use that copy. Don't reinstall a private duplicate. **Read from the central location, not from your own home.**
 
-3. **When WRITING persistent data**: route it through `~/.agent-guild/skills_data/<your-skill-name>/` — split into `public/` and `private/` subdirectories if the data has mixed sensitivity (see Privacy layering below).
+3. **When WRITING persistent data selected for this shared backup root**: route it through `~/.agent-guild/skills_data/<your-skill-name>/` — split into `public/` and `private/` subdirectories if the data has mixed sensitivity (see Privacy layering below).
 
 ### Two more rules once more than one device is involved (protocol 3.3+)
 
@@ -483,6 +583,8 @@ The central directory has a **convention layer** of subdirectories that Agent Gu
 
 ### Concrete examples
 
+The following examples assume the user has selected sharing these assets.
+
 | The user said... | What you should do |
 |---|---|
 | "Install the wechat-publisher skill" | `git clone` / `cp -R` it into `~/.agent-guild/skills/wechat-publisher/`, then symlink/copy from there into your runtime — same fallback ladder as in Step 3 |
@@ -495,8 +597,8 @@ The central directory has a **convention layer** of subdirectories that Agent Gu
 
 - **The user backs up `~/.agent-guild/` once → everything moves with them.** All shared skills, MCPs, plugins, tools, and skill data come along on the same rsync.
 - **New agents joining the protocol see the same shared data and capabilities** without each one reinventing storage.
-- **Data written outside this tree is invisible to other joined agents** and won't follow the user across machines.
-- **A user who installs a useful skill once** wants it available to every agent they talk to, not just the one that did the install.
+- **Data written outside this tree needs its own discovery and backup arrangement.**
+- **A skill selected for sharing can be installed once** and reused by the intended agents.
 
 ### Privacy layering for mixed-sensitivity data
 
@@ -511,6 +613,10 @@ If a skill writes a mix of shareable + sensitive data, split into clearly named 
 
 See [`CONVENTIONS.md`](CONVENTIONS.md) (also at `~/.agent-guild/CONVENTIONS.md`) for the full convention spec.
 
+Directory names such as `private/` and `memory/<agent>/` do not enforce access
+control. Agents with filesystem access may read them; choose storage and
+backup exclusions to match the user's intended sharing boundary.
+
 ### When NOT to use these locations
 
 The convention is a default, not a mandate. Keep data outside `~/.agent-guild/` when:
@@ -519,7 +625,10 @@ The convention is a default, not a mandate. Keep data outside `~/.agent-guild/` 
 - The data should be wiped on logout / shared across users / encrypted at rest by an OS service
 - The skill / runtime *requires* a specific path it doesn't control
 
-**This convention is default-on.** Every joined agent MUST follow it, with one escape hatch: if your runtime *requires* a private location (e.g. a platform-managed skills dir), use the private path and note the reason in `registry.json` — that counts as compliant. Otherwise, ignoring this step is a protocol violation.
+**This convention applies to assets the user selected for sharing.** A
+memory-only member may keep other assets private without violating the
+protocol. If a runtime requires a separate path for an asset selected for
+sharing, keep that path and record the reason in `registry.json`.
 
 ---
 
@@ -589,11 +698,11 @@ File added upstream → ✓ copied. File modified upstream → ✓ overwritten. 
 
 Each session you read directly from `~/.agent-guild/skills/agent-guild/SKILL.md`. Always live. No update step.
 
-### 7.4 — Post-update self-test (mandatory, even on Tier 1 / Tier 3)
+### 7.4 — Post-update self-test
 
-> **CRITICAL: After any update — including Tier 1's "free" updates — re-run the closed-loop trigger test from Step 4.B.** A protocol update can introduce frontmatter or schema changes your runtime parses differently. "It used to work" is not evidence "it still works".
+> **After an update, verify the selected mode still works.** Runtime installations re-run the trigger test from Step 4.B; memory-only mode re-runs the saved-and-retrieved check. A previous successful check does not prove the updated version works.
 
-Specifically:
+For a runtime installation:
 
 1. Re-trigger the skill in your runtime.
 2. Confirm the runtime's view of `agent-guild` reflects the **new** description / capabilities (description echo). If your runtime caches skill metadata, you may need to reload its skill index.
@@ -624,6 +733,10 @@ Rule of thumb: **never** leave the user with a half-updated install + a "looks-l
 
 ## Final acknowledgment
 
+For memory-only mode, report the saved-and-retrieved test result, the guild
+path, and registration status. State that no runtime skill trigger was
+verified; this is a complete memory-only setup, not a failed full installation.
+
 After Steps 1-5 are done **and the Step 4 trigger test passed**, tell the user:
 
 > **✅ Joined Agent Guild.**
@@ -641,7 +754,7 @@ If the trigger test ultimately failed → use the **Section D honest report** te
 
 If a step fails, KEEP GOING. Report what failed, complete what's possible.
 
-- Step 1 fails (no central dir) → tell user to install, stop.
+- Step 1 fails (no central dir) → initialize from the current package or use the installer; report a blocker only if neither can run.
 - Step 2 fails (can't find your own user-extensible skills dir) → **join read-only**. Do not install "somewhere plausible" inside another agent's tree.
 - Step 3 installed in another agent's directory → roll back, redo Step 2.
 - Step 4 trigger test fails → walk the ladder per Section C. Don't fake success.

@@ -19,9 +19,12 @@ VERSION="$(grep -E '"skill_version"' "$ROOT/manifest.json" | head -1 | grep -oE 
 [ -n "$VERSION" ] || { echo "cannot read skill_version from manifest.json" >&2; exit 1; }
 
 OUT="${1:-$HOME/Downloads/agent-guild-v${VERSION}.zip}"
+mkdir -p "$(dirname "$OUT")"
+OUT="$(cd "$(dirname "$OUT")" && pwd)/$(basename "$OUT")"
 
 STAGE="$(mktemp -d)"
-trap 'rm -rf "$STAGE"' EXIT
+ARCHIVE="${STAGE}.zip"
+trap 'rm -rf "$STAGE"; rm -f "$ARCHIVE"' EXIT
 
 PKG="$STAGE/agent-guild"
 mkdir -p "$PKG/scripts" "$PKG/references"
@@ -32,7 +35,8 @@ cp "$ROOT/manifest.json" "$PKG/manifest.json"
 # Scripts: everything in scripts/ except the packager itself. Wildcarded on
 # purpose — adding scripts/<new-tool> needs no edit here.
 for f in "$ROOT"/scripts/*; do
-  [ "$(basename "$f")" = "package.sh" ] && continue
+  [ -f "$f" ] || continue
+  case "$(basename "$f")" in package.sh|*.pyc|*.pyo) continue ;; esac
   cp "$f" "$PKG/scripts/"
 done
 
@@ -43,17 +47,16 @@ done
 for f in "$ROOT"/references/*.md; do
   cp "$f" "$PKG/references/"
 done
+# Keep README paths identical to the repository so relative links resolve.
+cp "$ROOT/README.md" "$ROOT/README_EN.md" "$PKG/"
 
 # Some registries reject extensionless files; the license travels as .md.
 cp "$ROOT/LICENSE" "$PKG/LICENSE.md"
 
 chmod +x "$PKG/scripts/ag.py" "$PKG/scripts/install.sh" 2>/dev/null || true
 
-mkdir -p "$(dirname "$OUT")"
-rm -f "$OUT"
-(cd "$STAGE" && zip -r -X "$OUT" agent-guild -x "*.DS_Store" -x "*__pycache__*" >/dev/null)
-
-echo "✔ packaged: $OUT   ($(du -h "$OUT" | cut -f1), layout: references/)"
+# Validate a staged archive before replacing a previous release artifact.
+(cd "$STAGE" && zip -r -X "$ARCHIVE" agent-guild -x "*.DS_Store" -x "*__pycache__*" >/dev/null)
 
 # ----------------------------------------------------------------- checks ---
 
@@ -76,7 +79,7 @@ check "no extensionless files" "$([ -z "$NOEXT" ] && echo 0 || echo 1)"
 
 # Every references/*.md quoted in SKILL.md must exist inside the package —
 # a dangling link here is exactly the v3.9.1 bug class this check kills.
-python3 - "$PKG" <<'PY'
+if python3 - "$PKG" <<'PY'
 import re, sys, pathlib
 pkg = pathlib.Path(sys.argv[1])
 body = (pkg / "SKILL.md").read_text(encoding="utf-8")
@@ -86,44 +89,64 @@ if missing:
     print(f"  FAIL dangling doc links: {', '.join(missing)}")
 sys.exit(1 if missing else 0)
 PY
-check "SKILL.md doc links resolve" "$?"
+then
+  check "SKILL.md doc links resolve" 0
+else
+  check "SKILL.md doc links resolve" 1
+fi
 
 JUNK="$(cd "$STAGE" && find . \( -name ".DS_Store" -o -name "__pycache__" -o -name "*.pyc" -o -name ".venv" \) | head -5)"
 check "no OS noise / caches" "$([ -z "$JUNK" ] && echo 0 || echo 1)"
 
-SIZE_KB="$(du -k "$OUT" | cut -f1)"
+SIZE_KB="$(du -k "$ARCHIVE" | cut -f1)"
 check "size under 3MB (${SIZE_KB}KB)" "$([ "$SIZE_KB" -lt 3072 ] && echo 0 || echo 1)"
 
 # Required frontmatter for skill registries, plus the SemVer shape.
-python3 - "$PKG/SKILL.md" "$VERSION" <<'PY'
+if python3 - "$PKG/SKILL.md" "$VERSION" <<'PY'
 import re, sys
 path, version = sys.argv[1], sys.argv[2]
 fm = open(path, encoding="utf-8").read().split("---", 2)[1]
+valid = True
 required = ["name", "description", "description_zh", "description_en",
             "version", "author", "display_name", "display_name_en", "slug"]
 missing = [k for k in required if not re.search(rf"^{k}:", fm, re.M)]
+valid = valid and not missing
 print("  ok   frontmatter: all required fields present" if not missing
       else f"  FAIL frontmatter missing: {', '.join(missing)}")
 
 v = re.search(r'^version:\s*"?([^"\s]+)"?', fm, re.M)
 v = v.group(1) if v else ""
 ok = bool(re.fullmatch(r"\d+\.\d+\.\d+", v)) and v == version
+valid = valid and ok
 print(f"  ok   version {v} is SemVer and matches manifest" if ok
       else f"  FAIL version '{v}' must be x.y.z and match manifest ({version})")
 
 name = re.search(r"^name:\s*(\S+)", fm, re.M)
 name = name.group(1) if name else ""
-print(f"  ok   name '{name}' is kebab-case" if re.fullmatch(r"[a-z0-9]+(-[a-z0-9]+)*", name)
+name_ok = bool(re.fullmatch(r"[a-z0-9]+(-[a-z0-9]+)*", name))
+valid = valid and name_ok
+print(f"  ok   name '{name}' is kebab-case" if name_ok
       else f"  FAIL name '{name}' must be kebab-case")
 
 d = re.search(r"^description:\s*\|\n(.*?)(?=^\w+:)", fm, re.S | re.M)
 n = len(d.group(1)) if d else len(re.search(r"^description:\s*(.+)$", fm, re.M).group(1))
+valid = valid and n <= 1024
 print(f"  ok   description {n} chars (limit 1024)" if n <= 1024
       else f"  FAIL description {n} chars exceeds the 1024 limit")
+sys.exit(0 if valid else 1)
 PY
+then
+  :
+else
+  fail=1
+fi
 
 echo
 echo "  contents:"
 (cd "$STAGE" && find . -type f | sed 's|^\./|    |' | sort)
 
 [ "$fail" = "0" ] || { echo; echo "✖ package has issues — fix them before uploading" >&2; exit 1; }
+
+mv -f "$ARCHIVE" "$OUT"
+echo
+echo "✔ packaged: $OUT   ($(du -h "$OUT" | cut -f1), layout: references/)"

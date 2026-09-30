@@ -4,7 +4,7 @@
 # Windows users: use install.ps1 instead.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/dqsjqian/agent-guild/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/dqsjqian/agent-guild/main/scripts/install.sh | bash
 # or:
 #   bash install.sh
 #
@@ -35,24 +35,36 @@ REPO_RAW_URL="${AGENT_GUILD_REPO:-https://raw.githubusercontent.com/dqsjqian/age
   #   tools/<name>/         shared scripts / utilities (CLI helpers, dotfiles, etc.)
   #   memory/<agent>/       agent-private memory adopted from each runtime
   #   memory/shared/        facts every joined agent should know
-  mkdir -p "$CENTRAL"/{skills/agent-guild/scripts,skills/agent-guild/docs,skills_data,mcp,plugins,tools,memory/shared,identity,rules,toolchain,projects,hosts,log/daily,log/decisions,log/archive,handoff/inbox,handoff/archive,handoff/shared-state}
+  mkdir -p "$CENTRAL"/{skills/agent-guild/scripts,skills/agent-guild/references,skills_data,mcp,plugins,tools,memory/shared,identity,rules,toolchain,projects,hosts,log/daily,log/decisions,log/archive,handoff/inbox,handoff/archive,handoff/shared-state}
+
+  # Download beside the destination, then replace it only after success. A
+  # failed transfer must not truncate a working install or hide its error.
+  download_file() {
+    local url="$1" target="$2" temp
+    temp="$(mktemp "${target}.download.XXXXXX")" || return 1
+    if curl -fsSL "$url" -o "$temp"; then
+      mv -f "$temp" "$target"
+    else
+      rm -f "$temp"
+      return 1
+    fi
+  }
 
   # Protocol skeleton (always overwrite — controlled by this project)
   # Docs go BOTH to the central root (user-facing entry points) and into the
-  # skill package (so `ag init` can re-seed the root docs from skills/<pkg>/docs).
-  curl -fsSL "$REPO_RAW_URL/references/ONBOARDING.md"                         -o "$CENTRAL/ONBOARDING.md"
-  curl -fsSL "$REPO_RAW_URL/references/CONVENTIONS.md"                        -o "$CENTRAL/CONVENTIONS.md"
-  curl -fsSL "$REPO_RAW_URL/references/SPEC.md"                               -o "$CENTRAL/SPEC.md"
-  curl -fsSL "$REPO_RAW_URL/references/PORTABILITY.md"                        -o "$CENTRAL/PORTABILITY.md"
-  curl -fsSL "$REPO_RAW_URL/references/ONBOARDING.md"  -o "$CENTRAL/skills/agent-guild/references/ONBOARDING.md"
-  curl -fsSL "$REPO_RAW_URL/references/CONVENTIONS.md" -o "$CENTRAL/skills/agent-guild/references/CONVENTIONS.md"
-  curl -fsSL "$REPO_RAW_URL/references/SPEC.md"        -o "$CENTRAL/skills/agent-guild/references/SPEC.md"
-  curl -fsSL "$REPO_RAW_URL/references/PORTABILITY.md" -o "$CENTRAL/skills/agent-guild/references/PORTABILITY.md"
-  curl -fsSL "$REPO_RAW_URL/README.md"                 -o "$CENTRAL/skills/agent-guild/references/README.md"
-  curl -fsSL "$REPO_RAW_URL/README_EN.md"              -o "$CENTRAL/skills/agent-guild/references/README_EN.md"
-  curl -fsSL "$REPO_RAW_URL/SKILL.md"         -o "$CENTRAL/skills/agent-guild/SKILL.md"
-  curl -fsSL "$REPO_RAW_URL/manifest.json"    -o "$CENTRAL/skills/agent-guild/manifest.json"
-  curl -fsSL "$REPO_RAW_URL/scripts/ag.py"                         -o "$CENTRAL/skills/agent-guild/scripts/ag.py"
+  # skill package (so `ag init` can re-seed from skills/<pkg>/references).
+  for doc in ONBOARDING CONVENTIONS SPEC PORTABILITY; do
+    download_file "$REPO_RAW_URL/references/$doc.md" "$CENTRAL/$doc.md"
+  done
+  for doc in ONBOARDING CONVENTIONS SPEC PORTABILITY CAPABILITIES LEARNINGS SECURITY dsh; do
+    download_file "$REPO_RAW_URL/references/$doc.md" "$CENTRAL/skills/agent-guild/references/$doc.md"
+  done
+  for doc in README README_EN; do
+    download_file "$REPO_RAW_URL/$doc.md" "$CENTRAL/skills/agent-guild/$doc.md"
+  done
+  download_file "$REPO_RAW_URL/SKILL.md" "$CENTRAL/skills/agent-guild/SKILL.md"
+  download_file "$REPO_RAW_URL/manifest.json" "$CENTRAL/skills/agent-guild/manifest.json"
+  download_file "$REPO_RAW_URL/scripts/ag.py" "$CENTRAL/skills/agent-guild/scripts/ag.py"
   chmod +x "$CENTRAL/skills/agent-guild/scripts/ag.py" 2>/dev/null || true
   # Remove the pre-3.0 CLI name if upgrading from an older install
   rm -f "$CENTRAL/skills/agent-guild/scripts/ac.py" 2>/dev/null || true
@@ -62,7 +74,7 @@ REPO_RAW_URL="${AGENT_GUILD_REPO:-https://raw.githubusercontent.com/dqsjqian/age
     local target="$1"
     local url="$2"
     [ -f "$target" ] && return 0
-    curl -fsSL "$url" -o "$target" 2>/dev/null || true
+    download_file "$url" "$target" 2>/dev/null || true
   }
   seed_if_missing "$CENTRAL/identity/profile.md"   "$REPO_RAW_URL/references/examples/identity-profile.template.md"
   seed_if_missing "$CENTRAL/identity/ROUTINE.md"   "$REPO_RAW_URL/references/examples/identity-routine.template.md"
@@ -103,7 +115,7 @@ EOF
 
   # Audit trail (append-only; ag.py creates it on demand if missing)
   [ -f "$CENTRAL/log/audit.jsonl" ] || : > "$CENTRAL/log/audit.jsonl"
-} > /dev/null 2>&1
+} > /dev/null
 
 # ── User-facing output (the only thing the user sees) ──────────────
 echo

@@ -8,11 +8,18 @@ of trusting a summary.
 
 ## Scope in one line
 
-All data stays in `~/.agent-guild/` on the user's own machine. There is no
-telemetry, no analytics, no phone-home, and no account. The only outbound
-request the code can make is a version check against public endpoints, run on
-demand by `ag upgrade`, or by the rate-limited bootstrap self-check (3.9.0+,
-configurable and disableable via `UPGRADE.md`).
+The CLI stores plaintext in `~/.agent-guild/` and does not upload memory
+content or require an account. It checks public release versions and can
+download this project's updates. `UPGRADE.md` controls bootstrap checks:
+`mode = check` is the default, `off` disables them, and `apply` also installs
+updates. `ag bootstrap <agent> --no-maintenance` skips both upgrade checks
+and automatic grooming for that invocation.
+
+Local storage does not control what a calling AI runtime does with text it
+reads. The guild provides no encryption or per-agent access control:
+`private/` and `memory/<agent>/` are naming conventions, and `recall` searches
+all memory subdirectories. Git ignore rules do not restrict runtime reads
+or other sync tools. Share only within the user's chosen trust boundary.
 
 ## Operation by operation
 
@@ -27,7 +34,7 @@ configurable and disableable via `UPGRADE.md`).
 | **Writing files** | everywhere | The guild is a set of Markdown/JSON files | Writes stay inside `~/.agent-guild/`. The only writes outside it are the links an agent asks for during `adopt` / `link-root`, pointing back into the guild, plus the inbound link `port --apply` recreates at a path whose payload it just moved in |
 | **Changing permissions** | `scripts/install.sh`, `scripts/install.ps1` | `chmod +x` on this project's own CLI after download | Applies only to `scripts/ag.py` and `scripts/install.sh` inside the install directory |
 | **Collecting system information** | `platform_facts`, `detect_os`, `detect_arch`, `host_id` | Tell devices apart so one guild directory can be carried between them: OS tag, CPU architecture, hostname, Python version, whether symlinks work | Written to `hosts/<host-id>/host.json` on the local disk and used for local decisions. Never transmitted. `AG_HOST_ID` lets a user replace the hostname with any label they prefer |
-| **Moving / copying files** | `cmd_adopt`, `cmd_link_root`, `cmd_port`, `_groom` | Consolidate scattered assets into the guild, archive expired data | Default is a dry-run report; `--apply` is required to move anything. Moves are verified afterwards and rolled back on failure. Credentials (`connectors/`) are excluded from adoption by design |
+| **Moving / copying files** | `cmd_adopt`, `cmd_link_root`, `cmd_port`, `_groom` | Consolidate selected assets, archive expired data | `adopt`, `link-root` and `port` preview by default; `--apply` executes within the user's selected scope. `groom` applies retention unless `--dry-run`; bootstrap may invoke it automatically unless `--no-maintenance`. Adoption excludes connector stores. Memory-only use requires no asset migration |
 | **Reading files** | `cmd_bootstrap` and friends | Read the user's own shared context: identity, rules, projects, focus, inbox | Reads inside `~/.agent-guild/`, plus the agent home directories listed in `registry.json` when auditing installs |
 
 ## Instruction-shaped text

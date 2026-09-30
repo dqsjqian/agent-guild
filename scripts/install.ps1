@@ -1,7 +1,7 @@
 ﻿# Agent Guild — Windows installer (PowerShell)
 #
 # Usage (one-shot):
-#   iwr -useb https://raw.githubusercontent.com/dqsjqian/agent-guild/main/install.ps1 | iex
+#   iwr -useb https://raw.githubusercontent.com/dqsjqian/agent-guild/main/scripts/install.ps1 | iex
 #
 # Or:
 #   .\install.ps1
@@ -38,7 +38,7 @@ $null = & {
     #   memory\<agent>\       agent-private memory adopted from each runtime
     #   memory\shared\        facts every joined agent should know
     $dirs = @(
-        'skills\agent-guild\scripts','skills\agent-guild\docs','skills_data','mcp','plugins','tools',
+        'skills\agent-guild\scripts','skills\agent-guild\references','skills_data','mcp','plugins','tools',
         'memory\shared',
         'identity','rules','toolchain','projects','hosts',
         'log\daily','log\decisions','log\archive',
@@ -54,24 +54,28 @@ $null = & {
     # Protocol skeleton (always overwrite — controlled by this project)
     function Download-File {
         param([string]$Url, [string]$Dest)
+        $temp = $Dest + '.download.' + [Guid]::NewGuid().ToString('N')
         try {
-            Invoke-WebRequest -UseBasicParsing -Uri $Url -OutFile $Dest -ErrorAction Stop
-            return $true
-        } catch {
-            return $false
+            Invoke-WebRequest -UseBasicParsing -Uri $Url -OutFile $temp -ErrorAction Stop
+            Move-Item -LiteralPath $temp -Destination $Dest -Force
+        } finally {
+            if (Test-Path -LiteralPath $temp) {
+                Remove-Item -LiteralPath $temp -Force
+            }
         }
     }
 
     # Docs go BOTH to the central root (user-facing entry points) and into the
-    # skill package (so `ag init` can re-seed root docs from skills\<pkg>\docs).
-    Download-File "$RepoRawUrl/references/ONBOARDING.md"                      (Join-Path $Central 'ONBOARDING.md')                          | Out-Null
-    Download-File "$RepoRawUrl/references/CONVENTIONS.md"                     (Join-Path $Central 'CONVENTIONS.md')                         | Out-Null
-    Download-File "$RepoRawUrl/references/SPEC.md"                            (Join-Path $Central 'SPEC.md')                                | Out-Null
-    Download-File "$RepoRawUrl/references/PORTABILITY.md"                     (Join-Path $Central 'PORTABILITY.md')                         | Out-Null
-    Download-File "$RepoRawUrl/references/ONBOARDING.md"  (Join-Path $Central 'skills\agent-guild\docs\ONBOARDING.md')  | Out-Null
-    Download-File "$RepoRawUrl/references/CONVENTIONS.md" (Join-Path $Central 'skills\agent-guild\docs\CONVENTIONS.md') | Out-Null
-    Download-File "$RepoRawUrl/references/SPEC.md"        (Join-Path $Central 'skills\agent-guild\docs\SPEC.md')        | Out-Null
-    Download-File "$RepoRawUrl/references/PORTABILITY.md" (Join-Path $Central 'skills\agent-guild\docs\PORTABILITY.md') | Out-Null
+    # skill package (so `ag init` can re-seed from skills\<pkg>\references).
+    foreach ($doc in @('ONBOARDING', 'CONVENTIONS', 'SPEC', 'PORTABILITY')) {
+        Download-File "$RepoRawUrl/references/$doc.md" (Join-Path $Central "$doc.md")
+    }
+    foreach ($doc in @('ONBOARDING', 'CONVENTIONS', 'SPEC', 'PORTABILITY', 'CAPABILITIES', 'LEARNINGS', 'SECURITY', 'dsh')) {
+        Download-File "$RepoRawUrl/references/$doc.md" (Join-Path $Central "skills\agent-guild\references\$doc.md")
+    }
+    foreach ($doc in @('README', 'README_EN')) {
+        Download-File "$RepoRawUrl/$doc.md" (Join-Path $Central "skills\agent-guild\$doc.md")
+    }
     Download-File "$RepoRawUrl/SKILL.md"      (Join-Path $Central 'skills\agent-guild\SKILL.md')      | Out-Null
     Download-File "$RepoRawUrl/manifest.json" (Join-Path $Central 'skills\agent-guild\manifest.json') | Out-Null
     Download-File "$RepoRawUrl/scripts/ag.py" (Join-Path $Central 'skills\agent-guild\scripts\ag.py') | Out-Null
@@ -82,7 +86,7 @@ $null = & {
     function Seed-If-Missing {
         param([string]$Target, [string]$Url)
         if (-not (Test-Path $Target)) {
-            Download-File $Url $Target | Out-Null
+            try { Download-File $Url $Target } catch {}
         }
     }
     Seed-If-Missing (Join-Path $Central 'identity\profile.md')   "$RepoRawUrl/references/examples/identity-profile.template.md"
@@ -116,15 +120,18 @@ $null = & {
 
     $registry = Join-Path $Central 'registry.json'
     if (-not (Test-Path $registry)) {
-        @"
+        $registryBody = @"
 {
   "protocol_version": "3.0",
   "central_dir": "~/.agent-guild/",
   "agents": {}
 }
-"@ | Set-Content -Path $registry -Encoding UTF8
+"@
+        # PS 5.1's Set-Content -Encoding UTF8 adds a BOM, which Python's
+        # json.loads(...read_text(encoding='utf-8')) rejects.
+        [System.IO.File]::WriteAllText($registry, $registryBody, (New-Object System.Text.UTF8Encoding($false)))
     }
-} 2>&1
+}
 
 # ── User-facing output (the only thing the user sees) ──────────────
 # Build Chinese strings from UTF-8 bytes to avoid PS 5.1 source-encoding pitfalls.
@@ -135,5 +142,5 @@ $msg2 = $utf8.GetString([byte[]](0xEF,0xBC,0x88,0x50,0x6C,0x65,0x61,0x73,0x65,0x
 Write-Host ""
 Write-Host ("  " + $msg1 + $msg2)
 Write-Host ""
-Write-Host "  Read ~/.agent-guild/references/ONBOARDING.md"
+Write-Host "  Read ~/.agent-guild/ONBOARDING.md"
 Write-Host ""

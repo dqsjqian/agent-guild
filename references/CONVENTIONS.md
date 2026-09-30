@@ -1,8 +1,8 @@
-# Agent Guild — Conventions (default-on)
+# Agent Guild — Shared asset conventions
 
-> This file describes **default-on conventions** for things that live *alongside* the core protocol. They are NOT optional: every joined agent MUST follow them, with one escape hatch — if your runtime *requires* a private location (e.g. a platform-managed skills dir), use it and note the reason in `registry.json`. That counts as compliant.
+> These placement conventions apply to assets the user chooses to share through the guild. **Joining for shared memory does not authorize moving existing skills, tools or private data.** In full shared-center mode, use these locations for the selected assets; keep runtime-managed or intentionally separate assets in their existing locations.
 >
-> These conventions sit a layer *above* the core protocol (identity / rules / handoff / daily logs — see [`SPEC.md`](SPEC.md) and [`ONBOARDING.md`](ONBOARDING.md)). The protocol layer is the hard MUST; this convention layer is default-on with a documented escape hatch.
+> The core memory protocol (identity / rules / handoff / daily logs) works independently of asset consolidation. See [`SPEC.md`](SPEC.md) and [`ONBOARDING.md`](ONBOARDING.md). Existing full-center installations can continue unchanged.
 
 ## Why conventions, not rules
 
@@ -35,7 +35,7 @@ The `skills/` directory is **not** just where Agent Guild keeps its own runtime 
 
 ### Important properties
 
-- **Joined agents SHOULD prefer `~/.agent-guild/skills/<name>/` over installing a private copy.** If a user wants the wechat-publisher skill, install it once into the central bus. On the `dir-symlink` tier (`ag link-root`, one link for the whole skills dir) every joined runtime then sees it instantly — zero per-skill linking; per-skill tier runtimes link/copy/read from there using the Tier-1b/2/3 install pattern from `ONBOARDING.md` Step 3.
+- **For skills the user wants shared, prefer `~/.agent-guild/skills/<name>/`.** A request to install a skill in one runtime does not by itself select all runtimes. On the `dir-symlink` tier (`ag link-root`, one link for the whole skills dir), current and future guild skills become visible together; per-skill links let runtimes expose only selected skills. Runtime support and trigger verification still apply.
 - **Each skill subdirectory is owned by that skill.** Agent Guild does NOT validate or interpret its contents.
 - **Naming** (MUST): lowercase-hyphenated slug `[a-z0-9-]` (e.g. `qq-mail`, `agent-browser`, `wecom-doc-to-html`). No CJK characters, no spaces, no `-skill` suffix — the directory name is the identity, not a display label. The same rule applies to `skills_data/` and `connectors/` subdirectories.
 - **Discovery**: agents looking for a capability the user has previously installed SHOULD check `~/.agent-guild/skills/` first before asking the user to install something.
@@ -88,14 +88,14 @@ Skills that hold **mixed-sensitivity data** SHOULD split into clearly named subd
 
 ```
 ~/.agent-guild/skills_data/<skill-name>/
-├── public/      ← safe to sync everywhere (preferences, profiles, settings)
+├── public/      ← selected shareable data; review its destination before syncing
 ├── private/     ← sensitive — recommend .gitignore by default
 └── ...
 ```
 
-This is default-on, not optional. The point is: **make it easy for users to back up safely without surprising them**.
+Use this separation for mixed-sensitivity data that the user has chosen to store here. Directory names are not access controls: `private/` and `memory/<agent>/` do not prevent another process with filesystem access from reading them. `.gitignore` affects Git, not other sync tools or agent access.
 
-> **Credentials are NOT skill data.** Login cookies, API keys, OAuth tokens and lock files belong under `~/.agent-guild/connectors/<name>/` (Convention 6), not here — `skills_data/` is for a skill's user-facing data, and mixing secrets into it defeats the whole point of having a clean backup root.
+> **Credentials are NOT skill data.** Keep login cookies, API keys and OAuth tokens in their existing runtime or OS secret store, outside shared memory; Convention 6 describes an optional connector-state location — `skills_data/` is for a skill's user-facing data, and mixing secrets into it defeats the whole point of having a clean backup root.
 
 ### Default exclude template for a shared carrier
 
@@ -243,12 +243,12 @@ every device, so a machine path written there is wrong four times out of five.
 
 ## Convention 6 — Connector credentials
 
-> **Default location for connector credentials: `~/.agent-guild/connectors/<connector-name>/`**
+> **Optional location for explicitly selected connector state: `~/.agent-guild/connectors/<connector-name>/`**
 
-Login cookies, API keys, OAuth tokens, CLI lock files — anything a connector or integration uses to authenticate — belong under `connectors/<name>/`, **not** `skills_data/`. `skills_data/` is for a skill's user-facing data; credentials are a different category with different handling:
+Prefer the existing runtime or OS secret store. When the user explicitly chooses guild-managed connector state, keep it separate from `skills_data/` and shared memory:
 
 - **Manually placed, never auto-adopted.** `ag adopt` will not move credentials into the guild (moving secrets into a directory the user backs up is a risk, not a benefit). You place them there yourself.
-- **Gitignored by default.** The `.gitignore` template above excludes `connectors/` entirely, so credentials never leak into a private git mirror or an accidental public push.
+- **Configure exclusions explicitly.** The template above excludes `connectors/` only after it is applied to the actual Git repository. Other sync tools need their own rules, and already tracked files are not protected by `.gitignore`.
 - **Naming**: same lowercase-hyphenated slug as `skills/` and `skills_data/`.
 
 ```
@@ -258,11 +258,11 @@ Login cookies, API keys, OAuth tokens, CLI lock files — anything a connector o
 └── <other-connector>/...
 ```
 
-If a credential must be kept *outside* the guild entirely (e.g. OS keychain, a runtime-managed secret store), that is a legitimate escape hatch — note it in `registry.json` just like any other runtime-forced private path.
+Keeping credentials outside the guild is supported and requires no migration exception.
 
-## Convention 7 — Conventions are default-on; protocol stays versioned
+## Convention 7 — Preserve the chosen scope; protocol stays versioned
 
-**Conventions in this file are default-on, not optional** (escape hatch documented at the top). The *protocol* layer (`SPEC.md`) remains intentionally small and stable — a change to hard protocol requirements still goes through a normal versioned spec bump, not by quietly rewording a convention.
+Apply these defaults within the user's selected sharing scope. Preview `adopt` and `link-root` before an authorized migration; normal memory sessions must not expand that scope. The *protocol* layer (`SPEC.md`) stays versioned; this choice uses the existing install tiers and changes no on-disk schema.
 
 If you build a skill that wants to read another skill's `skills_data/`, that's between the two skills — don't lobby for the protocol to standardize the cross-skill access pattern.
 
@@ -281,7 +281,7 @@ If you build a skill that wants to read another skill's `skills_data/`, that's b
 | 5b — Link direction | — | Guild owns payloads; links point inward, relative inside | `ag doctor` / `ag port` |
 | 5c — Device-scoped facts | `~/.agent-guild/hosts/<host-id>/` | Local paths, install state, this machine's quirks | The device it belongs to |
 | 6 — Connector credentials | `~/.agent-guild/connectors/<name>/` | Login cookies / API keys / lock files (gitignored) | The owning connector |
-| 7 — Default-on, versioned | — | Conventions are default-on; hard protocol changes stay versioned | — |
+| 7 — Scoped, versioned | — | Placement follows the chosen sharing scope; protocol changes stay versioned | — |
 
 ---
 

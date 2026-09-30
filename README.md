@@ -1,221 +1,152 @@
 # Agent Guild
 
-> 一个协议——让任何足够聪明的 AI agent 只需读一个文件，就能加入你的共享记忆。
+> 让多个本地 AI 助手复用同一份偏好、项目约定和工作交接。
 
 [English](README_EN.md) | **中文**
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Status](https://img.shields.io/badge/status-MVP-blue)]()
-[![Protocol](https://img.shields.io/badge/protocol-v3.3-green)]()
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/dqsjqian/agent-guild/blob/main/LICENSE)
+[![Protocol](https://img.shields.io/badge/protocol-v3.3-green)](references/SPEC.md)
 
----
+Agent Guild 面向**同一用户使用的多个、受信任且能够读写本地文件的 AI 助手**。
+它把共享上下文放进 `~/.agent-guild/` 的 Markdown / JSON 文件：你能查看、修改、备份，
+切换助手时也能继续使用。运行时 skill 提供读写约定，Python CLI 处理并发写入、检索和归档。
 
-**你大概率每天都在多个 AI agent 之间切换** —— Claude Code、Cursor、CodeBuddy、WorkBuddy、OpenClaw、Aider、GitHub Copilot Chat……每一个都是孤岛。每一个都各自有它对你的记忆，谁也不知道别人学到了什么。同样的偏好你要反复教。
+## 先验证一次：A 记住，B 找到
 
-**Agent Guild 终结这件事。** 它是一个**协议**——不是框架、不是服务、甚至不是库——让你机器上的多个 AI agent 通过纯 Markdown 文件 + Unix 软链共享一份记忆真相源。
+安装并让两个助手接入后，用一条没有敏感内容的演示约定测试：
 
----
+1. 对助手 A 说：
+   > 请记住这条长期演示约定：演示项目的交付说明必须包含验证结果。
+   > 保存到协会的 `memory/shared/demo.md`，登记到 `memory/shared/INDEX.md`，并告诉我保存路径。
+2. 切换到助手 B，说：
+   > 在协会里查找“演示项目”的交付约定，复述内容并引用来源文件。
+3. 确认 B 找到同一条内容和文件。测试结束后，可以删除这条演示约定及其索引项。
 
-## 30 秒理解
+这才是共享记忆的验收结果；磁盘上出现 skill 文件只是接入的第一步。
+长期偏好和项目约定放在身份、规则或共享记忆中；`log/daily/` 记录会话经过，不代替长期记忆。
+助手仍需按协议读取相关上下文，Agent Guild 不会自动把所有历史塞进每一次回答。
 
-```
-~/.agent-guild/                ← 你机器上的中央目录
-│
-│  ─── 协议层（强制）───
-├── ONBOARDING.md                ← 新 agent 一次性入会流程
-├── CONVENTIONS.md               ← 可选的、非规范性约定
-├── RETENTION.md                 ← 数据保留策略（groom 防劣化阈值，用户可改）
-├── identity/                    ← 你是谁（profile / 作息）
-├── rules/                       ← 所有 agent 必须遵守的硬规则
-├── toolchain/                   ← 工具 / 路径 / 配置
-├── projects/                    ← 你在做什么
-├── log/daily/                   ← 按 agent 分文件的日志（无写冲突）
-├── handoff/                     ← 跨 agent 收件箱 + 共享状态
-├── hosts/<host-id>/             ← 每台设备自己的状态（本机路径、安装情况）
-├── learnings/                   ← 跨 agent 学习台账（纠正/错误/特性请求）
-├── skills/agent-guild/    ← 从仓库根安装的 runtime skill（SKILL.md + manifest + scripts）
-├── registry.json                ← 哪些 agent 加入了
-│
-│  ─── 约定层（可选，推荐）───
-├── skills_data/<skill>/         ← 各 skill 自己的持久化数据（一个备份根管所有）
-├── mcp/<server>/                ← 共享 MCP server 配置
-├── plugins/<name>/              ← 共享插件
-└── tools/<name>/                ← 共享 CLI 脚本/工具（+ tool.json 声明各平台）
-```
+## 适合谁，有哪些边界
 
-每个加入的 agent 把自己的 skills 目录用**一条目录级软链**指向协会：
+| 你的需求 | Agent Guild 的做法 |
+|---|---|
+| 经常切换两个或更多本地助手，不想重复交代约定 | 共享身份、规则、项目状态和可检索的记忆文件 |
+| 想看清助手记了什么，并自行修正 | 使用普通 Markdown / JSON 文件，不依赖专有数据库 |
+| 想交接未完成的工作 | 共享当前焦点、收件箱和当日日志；接收方读取后继续 |
+| 想把个人工作上下文搬到另一台设备 | 区分共享、平台和本机信息；文件搬运由你选择 |
+| 还想统一 skills、工具及其数据位置 | 可选择完整共享中心模式；无需为了试用记忆而先迁移这些资产 |
 
-```bash
-~/.<你的-agent>/skills → ~/.agent-guild/skills/
-```
+它不提供多人权限隔离、自动跨设备同步或后台任务执行。没有本地文件访问能力的助手，
+不能直接使用这个目录；有文件访问能力但不能加载自定义 skill 的助手，可以手动读取协议，
+不过需要在会话中提醒它使用，不等同于自动触发。
 
-就这。**没有 daemon。没有服务器。没有 npm install。没有第三方运行时。纯文件系统。**
+核心取舍是：**少量基础设施、可检查的文件，换取助手遵守读写约定和用户管理文件访问范围。**
+CLI 需要 Python 3.9+，只使用标准库；没有服务端或常驻进程。
 
----
+## 安装与接入
 
-## 为什么需要它（以及它跟别的方案有啥不同）
+### 1. 建立中央目录
 
-| 已有方案 | 它做什么 | 死穴 |
-|---|---|---|
-| ChatGPT Memory | 自动记住关于你的事实 | 锁死在 OpenAI 生态 |
-| Claude Projects | 项目级上下文 | Anthropic 独享 |
-| MemGPT / Letta | 单 agent 内部长期记忆 | 不跨 agent |
-| Mem0 | 跨 agent 的记忆服务 | 需要服务化部署、REST API、绑死供应商 |
-| MCP | 工具/资源协议 | 不是记忆方案 |
-| **Agent Guild** | **跨厂商、本地优先、纯文本、零依赖** | **要求 agent 智力够读懂一份文件** |
-
-差异化的关键：**我们不为每个 agent 写适配器**。我们写**一份** `SKILL.md`，任何足够聪明的 LLM 都能读懂并自我接入。读不懂的 agent……不配加入。这是设计本身。
-
----
-
-## 用户怎么让任何 AI agent 加入
-
-对 agent 说一句（任何语言、任何措辞）：
-
-> "请读 `~/.agent-guild/ONBOARDING.md` 加入这个体系。"
-
-就这一句话——这就是用户侧全部工作流。不需要装 CLI，不需要改配置。Agent 自己读这个文件，按里面的入会流程完成接入并报告。
-
-如果某个 agent 搞不定这件事，**说明这个 agent 不够聪明，不配做你的工作伙伴** —— 你也借此知道了。这是内置的能力测试。
-
----
-
-## 协议要求加入的 agent 做什么
-
-协议显式区分**一次性入会** vs **持续运行能力**：
-
-- **`ONBOARDING.md`**（一次性）：发现自己 runtime 的"用户可扩展 skill 目录"→ 收敛为指向协会的**一条目录级软链**（`ag link-root`；降级：逐 skill 软链 → copy → readonly）→ 闭环触发自检证明真的能调 → 在 `registry.json` 登记
-- **`SKILL.md`**（每次按需触发）：读共享身份/规则/当前焦点；查收件箱/发消息；写当日日志；刷新 `last_seen`。这是加入后 agent 一直带着的运行时能力
-
-详见：
-- [`ONBOARDING.md`](ONBOARDING.md) —— 一次性入会流程
-- [`SKILL.md`](../SKILL.md) —— 加入后的运行时能力
-- [`SPEC.md`](SPEC.md) —— 完整协议规范
-- [`CONVENTIONS.md`](CONVENTIONS.md) —— 非规范性的可选约定（如推荐的 skill 数据位置 `~/.agent-guild/skills_data/`）
-- [`manifest.json`](../manifest.json) —— 机器可读
-
----
-
-## 单一真相源 + 自动协议升级 + 自动防劣化
-
-每个加入 agent 的 `~/.<agent>/skills/` 是**一条目录级软链**，直接指向中央 `~/.agent-guild/skills/`。当本项目发布协议升级，你只更新中央目录，**用户机器上每个 agent 下次会话启动就看到新版本**。零推送、零版本检查、零 hash 比对——而且任何 agent 往协会装一个新 skill，所有已收敛的 runtime **立即可见**，永远不需要再补软链。文件系统语义就这么干净利落。（降级 tier：逐 skill 软链。）
-
-用户自己的内容（`identity/` `rules/` `toolchain/` 等）**从不会被上游覆盖** —— 它们存在于软链外的同级目录，跟协议骨架物理隔离。
-
-共享记忆只增不减迟早劣化：current-focus 变成一堵墙、日志无限堆积、审计滚成巨石。协议 3.2 内置 **groom 数据卫生**：skill 正常触发（bootstrap）后自动检测并整理——过期日志/焦点块/已解决的台账条目归档、审计轮转、过期消息进废纸篓。**永不硬删**（一切进 archive 或可恢复的 `.trash/`）、**策略可调**（`RETENTION.md`）、未读消息和手写内容永远只报告不动。也可手动 `ag groom --dry-run` 预览。
-
----
-
-## 安装（用户视角）
-
-### macOS / Linux / WSL / Git Bash
+macOS / Linux / WSL / Git Bash（需要 Bash 和 curl）：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/dqsjqian/agent-guild/main/scripts/install.sh | bash
 ```
 
-### Windows（PowerShell）
+Windows（PowerShell 5.1+）：
 
 ```powershell
 iwr -useb https://raw.githubusercontent.com/dqsjqian/agent-guild/main/scripts/install.ps1 | iex
 ```
 
-安装器只做**一件事**：在 `~/.agent-guild/`（Windows 上是 `%USERPROFILE%\.agent-guild\`）建中央目录 + seed 模板 + 末尾打印一条双语口令让你复制给 agent。**它不会动任何 agent 的 home 目录。** Agent 自己负责接入——这就是协议。
+安装器下载协议和 CLI、初始化模板，并打印接入口令。它不修改助手自己的目录。
+要先检查源码，也可以下载并阅读安装脚本后再运行。
 
-### 手动安装
+### 2. 让每个助手接入
 
-```bash
-git clone https://github.com/dqsjqian/agent-guild ~/.agent-guild
-```
+初次试用建议只接入共享记忆，对助手说：
 
-然后对你的 agent 说：
+> 请读 `~/.agent-guild/ONBOARDING.md`，仅接入共享记忆，保留现有 skills 和工具目录。
 
-> "请阅读 `~/.agent-guild/ONBOARDING.md` 加入 Agent Guild。"
+需要统一管理更多资产时，可以明确选择完整共享中心：
 
-Agent 会自己想办法接入（目录级软链、逐 skill 软链、拷贝、或者只读 fallback——具体见 ONBOARDING.md）。
+> 请读 `~/.agent-guild/ONBOARDING.md`，按完整共享中心模式接入，报告迁移的目录和使用的安装方式。
 
----
+完整模式会把可迁移资产放进协会，并尝试用目录链接连接助手的 skills 目录；不兼容时使用
+逐 skill 链接、拷贝或手动读取。详情见 [接入流程](references/ONBOARDING.md)。
+接入后运行上面的两助手验证，确认记忆能被实际找到。
 
-## 平台支持
+### 从源码安装
 
-| 系统 / Shell | 状态 |
-|---|---|
-| macOS | ✅ 一类支持 |
-| Linux | ✅ 一类支持（任何 POSIX shell） |
-| Windows + PowerShell 5.1+ | ✅ 一类支持（开发者模式或管理员权限；否则自动降级用目录 junction） |
-| Windows + WSL / Git Bash | ✅ 可用（Git Bash 需先设 `MSYS=winsymlinks:nativestrict`） |
-| 安卓（Termux）/ iOS shell | ✅ 识别为独立平台标签；不属于本平台的资产会明确报"本机不可用"并给安装指引 |
-| Windows + cmd.exe | ❌ 不支持（请用 PowerShell） |
-
-`ag platform` 会打印本机被识别成什么，包括**能不能建软链**——建不了也能加入，只是走 copy 档。
-
-### 升级（已经装过）
+将**项目源码**与**私人协会数据**分开放置。在你选择的源码工作目录运行：
 
 ```bash
-cd ~/.agent-guild && git pull   # （如果通过 git clone 装的）
-# 或重新跑：
-curl -fsSL https://raw.githubusercontent.com/dqsjqian/agent-guild/main/scripts/install.sh | bash
+git clone https://github.com/dqsjqian/agent-guild agent-guild-source
+python3 agent-guild-source/scripts/ag.py init demo-agent
 ```
 
-升级**永远不会**覆盖你的 `identity/` `rules/` `toolchain/`。只会更新协议骨架（`skills/`）。
+`demo-agent` 可换成你的助手名称；Windows 若使用 `python` 命令，相应替换 `python3`。
+`init` 会在 `~/.agent-guild/` 创建运行目录并安装 skill，然后按上面的口令让助手接入。
+不要把源码仓库直接克隆到私人数据目录。
 
----
+## 你能控制什么
 
-## 多设备 / 备份
+- **记忆内容**：身份、规则和项目文件由用户控制。助手只记录任务所需的摘要；不要把密码、token 等凭据写进共享记忆。
+- **网络与更新**：安装需要下载文件。运行时默认在 `bootstrap` 后按设备最多每 24 小时检查一次三个公开版本源，不上传记忆内容。`UPGRADE.md` 中 `mode = check` 只提示，`mode = apply` 会下载并安装新版本，`mode = off` 关闭自动检查；手动 `upgrade` 仍可使用。
+- **只查看上下文**：`bootstrap <agent> --no-maintenance` 跳过本次自动整理和升级检查，不改变已有策略。
+- **自动归档**：`bootstrap` 默认按设备每 24 小时尝试一次 groom，将过期日志、焦点及已解决台账搬到归档，轮转审计；未读消息只报告。先用 `groom --dry-run` 看计划，保留期限在 `RETENTION.md` 调整。归档不等于删除，也不会缩小整个目录的历史总量。
+- **共享范围**：`memory/<agent>/` 和 `private/` 是组织约定，不是权限或加密边界。能访问这些文件的程序仍可能读取它们；加入的助手应当是你信任的。
+- **模型与备份**：数据文件由 Agent Guild 保存在本机。助手读取后是否发送给模型服务，取决于该助手的运行方式；你选择的同步、备份工具也有自己的数据处理行为。
 
-整个 `~/.agent-guild/` 就是一个普通目录，可以用你习惯的任何方式搬到另一台机器：
-rsync、私有 git 仓、文件同步工具、云盘、U 盘。**协会自己不做同步**，不联网、
-没有 sync 命令——搬运方式由你定。它负责的是搬过去之后真正会出问题的那部分：
-**每台设备都分得清哪条数据对自己成立。**
+这些边界适用于 Agent Guild 本身；共享目录中的其他 skills / 工具有各自的权限和行为。
+详见 [安全与能力说明](references/SECURITY.md)。
 
-| 作用域 | 判定 | 放哪 |
-|---|---|---|
-| `shared` | 换设备照样成立 | 原样：`identity/` `rules/` `memory/` `learnings/` `skills/` |
-| `platform` | 只对某个 OS+架构成立 | `tools/<name>/tool.json`，二进制放 `bin/<os>-<arch>/` |
-| `host` | 只对本机成立 | `hosts/<host-id>/`（本机绝对路径、装了什么、本机笔记） |
+## 日常维护与升级
+
+可以直接对已接入的助手说：“记住这个项目约定”“查一下上次的决定”“更新当前焦点”或“整理协会”。
+完整命令见 [能力参考](references/CAPABILITIES.md)。CLI 的写入和检查都发生在调用时，不在后台运行。
+
+检查、应用本项目的版本更新：
 
 ```bash
-ag platform            # 我在哪台设备：os / 架构 / host-id / 软链能力
-ag tool doxygen        # 本平台的可执行路径；没有则退出码 3 + 该平台安装指引
-ag port                # 便携性体检；--apply 只做机械修复
+python3 "$HOME/.agent-guild/skills/agent-guild/scripts/ag.py" upgrade
+python3 "$HOME/.agent-guild/skills/agent-guild/scripts/ag.py" upgrade --apply
 ```
 
-换新设备的流程：目录搬过去 → `ag init <agent>`（自动认领新设备）→ `ag port`
-看差异 → 按提示装缺的平台工具。老设备的数据一个字节都不用改。
+Windows 使用 `python` 和 `$env:USERPROFILE` 对应路径。也可以重跑安装器。
+更新作用于 Agent Guild 自身的协议文件，不覆盖身份、规则和项目内容；链接安装随中央版本更新，
+拷贝安装还需同步助手内的副本，见 [更新流程](references/ONBOARDING.md#step-7--update-protocol-how-to-stay-current-as-the-central-skill-evolves)。
 
-**注意不要把它推到公开仓库**——里面是你的私人记忆。完整规则见
-[`PORTABILITY.md`](PORTABILITY.md)。
+## 文件结构与多设备
 
----
+```text
+~/.agent-guild/
+├── identity/ rules/ projects/     用户身份、约定、项目状态
+├── memory/shared/                跨助手的长期事实及 INDEX.md
+├── memory/<agent>/               按助手组织的记忆
+├── handoff/                      当前焦点、收件箱、归档
+├── log/ learnings/               会话日志、纠正与经验台账
+├── hosts/<host-id>/              本机路径、平台和安装状态
+├── skills/agent-guild/           Agent Guild 运行时 skill
+├── RETENTION.md UPGRADE.md       保留与自动检查策略
+└── registry.json                接入记录
+```
 
-## 项目状态 & 设计哲学
+完整共享中心还使用 `skills/`、`skills_data/`、`mcp/`、`plugins/`、`tools/`。
+共享事实留在常规目录；只对一个 OS / 架构成立的工具用平台声明；只对本机成立的路径放在
+`hosts/<host-id>/`。本机文件锁不能替代多设备文件同步的冲突处理。
 
-**Phase 1（已完成）：协议 + 参考内容。** 目录骨架、`SKILL.md`、`manifest.json`、跨平台安装脚本。README 才是产品。
+搬迁时，用你选择的方式复制所需目录，在新设备执行 `init` 和 `port` 体检，再处理缺失的平台工具。
+备份前检查包含的个人资料和凭据，不要把私人协会数据提交到公开仓库。
+详见 [跨设备与备份](references/PORTABILITY.md)。
 
-**Phase 2（已完成）：单文件 Python CLI**（`ag` 命令），子命令 `init / adopt / link-root / bootstrap / doctor / platform / tool / tools / port / upgrade / learn / review / resolve / groom / status / register / log / focus / send / audit / prune`。stdlib only，零第三方依赖，Windows / macOS / Linux 通用。
+## 项目与文档
 
-**Phase 3（进行中）：Adapters 目录。** 社区贡献各 agent 的接入指南。
+Agent Guild 是本地文件协议及其参考实现。它支持跨平台检测和多种链接降级方式；
+实际能否加载 skill，取决于助手运行时的文件权限和扩展能力，接入时需要验证。
 
-我们**坚决不会**做：
+- [运行时 skill](SKILL.md) · [完整规范](references/SPEC.md) · [约定](references/CONVENTIONS.md)
+- [接入流程](references/ONBOARDING.md) · [能力参考](references/CAPABILITIES.md) · [机器可读 manifest](manifest.json)
+- [贡献接入指南](https://github.com/dqsjqian/agent-guild/blob/main/references/adapters/README.md)
 
-- daemon（守护进程）
-- pip / npm 上的包
-- CRDT 同步引擎
-- 云服务
-- 聊天界面
-
-这个项目是一份**约定**，不是软件。约定胜过配置。文件系统胜过数据库。软链胜过同步逻辑。
-
----
-
-## License
-
-MIT。详见 [LICENSE](../LICENSE)。
-
-## 作者
-
-[@dqsjqian](https://github.com/dqsjqian) · 同时是 [soul-archive](https://github.com/dqsjqian/soul-archive)（数字人格存档）和 [ai-eight-creed](https://github.com/dqsjqian/ai-eight-creed)（AI 八耻八荣）的作者。
-
----
-
-> *让你的 AI agent 们终于停止互相不认识。*
+许可证：[MIT](https://github.com/dqsjqian/agent-guild/blob/main/LICENSE)。作者：[@dqsjqian](https://github.com/dqsjqian)。

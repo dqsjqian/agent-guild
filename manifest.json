@@ -15,7 +15,7 @@
   },
   "central_dir": "~/.agent-guild/",
   "central_layout": {
-    "_note": "Top-level directory layout under ~/.agent-guild/. Protocol layer (mandatory) and convention layer (default-on, per CONVENTIONS.md) co-exist as physical sibling directories.",
+    "_note": "Protocol state and optional shared-asset directories coexist under ~/.agent-guild/. Placement conventions apply within the user-selected sharing scope.",
     "protocol_layer": {
       "identity/": "user identity profile + routine (read by all agents)",
       "rules/": "shared rules (universal, public-repo, file-cleanup, safety)",
@@ -26,20 +26,20 @@
       "learnings/": "cross-agent self-improvement ledgers: LEARNINGS.md (corrections/gaps/best practices) + ERRORS.md (failures) + FEATURE_REQUESTS.md (missing capabilities) — see references/LEARNINGS.md (protocol 3.1+)",
       "registry.json": "agent presence + install metadata",
       "ONBOARDING.md": "one-time joining flow",
-      "CONVENTIONS.md": "default-on conventions (this file)",
+      "CONVENTIONS.md": "placement conventions for opted-in shared assets",
       "hosts/<host-id>/": "device-scoped state: host.json (probed os/arch/link capability), host-notes.md (user-owned facts true on THIS device only), VERSION + groom.json (runtime state installed here) — protocol 3.3+"
     },
     "convention_layer": {
-      "skills/<name>/": "agent-loadable capabilities (this skill itself + future shared skills); joined runtimes typically point their whole user-extensible skills dir at skills/ via ONE directory link (`ag link-root`), so every entry here is live for all of them at once",
-      "skills_data/<name>/": "per-skill persistent data — default location (escape hatch: runtime-forced private path) for any skill that needs to persist user-facing data, gives users a single backup root",
-      "memory/<agent>/": "agent-private memory files adopted from each runtime (MEMORY.md / SOUL.md / USER.md / IDENTITY.md, symlinked back to the agent home)",
+      "skills/<name>/": "Selected shared skills; whole-root installations expose every entry, while per-skill integrations expose selected packages.",
+      "skills_data/<name>/": "Skill data explicitly selected for shared storage and backup; runtime-managed and intentionally private stores may remain separate.",
+      "memory/<agent>/": "Agent-namespaced memory, not access-isolated; recall searches it alongside shared memory.",
       "memory/shared/": "cross-agent facts worth sharing with every joined agent",
       "mcp/<server>/": "shared MCP server configs / local implementations (e.g. an MCP server installed once, used by every joined agent)",
       "plugins/<name>/": "shared plugins (browser/editor/IDE extensions, etc.)",
       "tools/<name>/": "shared scripts and CLI utilities (helpers users want available across all agents)",
-      "connectors/<name>/": "connector credentials + config (login cookies, API keys, lock files) — manually placed, never auto-adopted; gitignored by default"
+      "connectors/<name>/": "Optional manually placed connector state; configure filesystem access and actual backup exclusions. Never auto-adopted."
     },
-    "_note_convention_layer": "Agent Guild does NOT read, write, validate, or interpret anything in the convention layer. It belongs entirely to the skills/MCPs/plugins/tools that own each subdirectory. Skills following this convention get free backup/sync semantics — when the user backs up ~/.agent-guild/, all participating skills come along."
+    "_note_convention_layer": "Each asset retains its owner and runtime semantics. Explicit maintenance commands may inspect or move selected assets; placement alone does not provide sync or access isolation."
   },
   "files": {
     "onboarding_entry": "references/ONBOARDING.md",
@@ -77,7 +77,7 @@
       "ref": "ONBOARDING.md",
       "frequency": "once per agent (or after major protocol-version bump)",
       "trigger": "user says 'join Agent Guild' / 'read ~/.agent-guild/ONBOARDING.md' / equivalent",
-      "summary": "Discover user-extensible skills dir → consolidate it into the guild with ONE directory link (dir-symlink → per-skill symlink → copy → readonly) → closed-loop trigger test → register in registry.json"
+      "summary": "Choose memory-only access (per-skill link, copy or direct read), verify the memory loop and runtime trigger, then register. Whole-toolkit consolidation is a separate user-selected mode."
     },
     "runtime": {
       "ref": "SKILL.md",
@@ -93,7 +93,7 @@
       "write_mode": "create_if_missing"
     },
     "link_root": {
-      "summary": "Consolidate the calling agent's whole user-extensible skills directory into ONE directory link <skills_root> -> ~/.agent-guild/skills, replacing the per-skill link pattern. New guild skills become visible to the runtime with zero per-skill maintenance. DEFAULT IS DRY-RUN — prints a classification report (links the guild already owns -> trash; foreign links -> moved INTO the guild; real adoptable skills -> abort, run adopt --apply first; host-wired / platform-managed items -> abort, keep per-skill tier) and changes nothing; only `--apply` executes. Only ever targets a dedicated skills directory, never an agent home itself. Windows directory junctions are detected via their reparse tag (Path.is_symlink() is False for junctions), so an already-junctioned skills dir is recognized as consolidated instead of being mistaken for unadopted skills. Recoverable deletes only; links are unlinked rather than trashed so a trash helper can never follow one into its target.",
+      "summary": "Optional full shared-center setup: replace this runtime's whole user-extensible skills directory with one link to ~/.agent-guild/skills. Preview by default; --apply requires the selected migration scope. Preserve link targets and aliases, block conflicting same-name links before mutation, and leave real skills or platform-managed items for separate handling. All current and future guild skills become visible to compatible runtimes.",
       "cmd": "python3 <skill_dir>/scripts/ag.py link-root <agent> [--apply]",
       "write_mode": "move_and_symlink"
     },
@@ -103,9 +103,9 @@
       "write_mode": "move_and_symlink"
     },
     "bootstrap": {
-      "summary": "One-shot read of all shared session context: identity/profile.md, identity/ROUTINE.md, rules/universal.md, projects/active.md, handoff/shared-state/current-focus.md, plus this agent's unread inbox and a list of other rules files to read on demand. Read-only except a rate-limited auto-groom at the end (protocol 3.2+): at most once per groom_interval_hours, it archives expired data per RETENTION.md — never deletes anything, never fails bootstrap.",
-      "cmd": "python3 <skill_dir>/scripts/ag.py bootstrap <agent>",
-      "write_mode": "auto_groom"
+      "summary": "Read core shared context and list this agent's inbox. By default also run rate-limited grooming (RETENTION.md) and upgrade checks (UPGRADE.md); mode=apply can install updates. --no-maintenance reads context without either hook. Recall retrieves additional memory on demand.",
+      "cmd": "python3 <skill_dir>/scripts/ag.py bootstrap <agent> [--no-maintenance]",
+      "write_mode": "policy_controlled_maintenance"
     },
     "doctor": {
       "summary": "Health check across the whole installation: dangling symlinks inside the guild and inside every registered agent's skills_root, missing core protocol files, registry drift (recorded home / skills_root no longer exists), and protocol-version drift (agent joined under an older major version than central). Prints concrete fixes. Read-only — never repairs silently.",
@@ -138,7 +138,7 @@
       "write_mode": "none"
     },
     "onboard": {
-      "summary": "One-time joining flow. The agent MUST install into its OWN user-extensible / 'custom skills' directory (NOT another agent's directory, NOT a built-in/whitelisted tier where files would land but never trigger). Preferred install: `ag link-root <agent> --apply` consolidates the whole skills dir into ONE directory link. After install, MUST run a closed-loop trigger test in its own runtime; on failure, walk down dir-symlink → symlink → copy → readonly autonomously, retesting after each change; only after exhausting all tiers may the agent deliver an honest 'cannot fully join' report. 'Files on disk' is not success; 'runtime can trigger this skill' is success.",
+      "summary": "Join within the user-selected scope. Memory-only access preserves existing skills and tool directories; use a per-skill link, copy or direct read. Full shared-center mode may adopt selected assets and link the whole skills root after preview. Discover only this runtime's user-extensible directory; verify its trigger, and report direct-read access honestly if automatic discovery is unavailable.",
       "ref": "ONBOARDING.md"
     },
     "log_daily": {
@@ -170,8 +170,8 @@
       "write_mode": "edit_in_place"
     },
     "send_message": {
-      "summary": "Write handoff/inbox/from-<src>-to-<dst>-<topic>.md",
-      "write_mode": "create_new"
+      "summary": "Append a local handoff/inbox/from-<src>-to-<dst>-<topic>.md message. This does not wake or contact the receiving runtime; it reads the inbox on a later session.",
+      "write_mode": "append"
     },
     "register": {
       "summary": "Update your entry in registry.json (Edit, not Write); include install_tier (dir-symlink|symlink|copy|readonly), install_verified, skills_root, protocol_version (the version you joined under, copied from this manifest at join time)",
@@ -191,17 +191,18 @@
       "_precondition": "Defined in ONBOARDING.md Step 2: the agent MUST locate its OWN user-extensible skills directory (the path the runtime is allowed to load third-party skills from — sometimes called 'Custom Skills', 'User Skills', or 'Plugins'). Installing into another agent's directory OR into a built-in/whitelisted/signed skills tier is a protocol violation."
     },
     {
-      "_postcondition": "Defined in ONBOARDING.md Step 4: after choosing a tier and installing, the agent MUST run a closed-loop trigger test (list / describe / invoke the skill in its own runtime) and ONLY treat the install as complete when the runtime confirms it can trigger the skill. Tier downgrade ladder dir-symlink → symlink → copy → readonly is mandatory if the test fails."
+      "_postcondition": "Verify runtime discovery/invocation for skill installation. Memory-only access tries symlink, copy, then direct reads; full sharing may start with dir-symlink. Direct-read access is usable without claiming automatic runtime triggering."
     },
     {
       "tier": "dir-symlink",
-      "preferred": true,
-      "description": "Agent replaces its whole user-extensible skills dir with ONE directory link <its-own-user-extensible-skills-dir> -> ~/.agent-guild/skills/ (ag link-root --apply). Every guild skill — current and future — is instantly visible; auto-updates with central; zero per-skill maintenance. Preferred whenever the runtime follows directory symlinks and the skills dir is dedicated to skills."
+      "preferred": false,
+      "description": "Optional full shared-center mode selected by the user: link the whole dedicated skills directory to ~/.agent-guild/skills. Current and future guild skills become visible together; preview migration scope before applying."
     },
     {
       "tier": "symlink",
-      "fallback": true,
-      "description": "Per-skill links: agent creates symlink <its-own-user-extensible-skills-dir>/agent-guild -> ~/.agent-guild/skills/agent-guild/ (and one link per guild skill). Use when the runtime refuses to follow a directory-level link, or the skills dir also hosts host-wired / platform-managed items that must stay in a real directory. Auto-updates with central."
+      "fallback": false,
+      "description": "Preferred memory-only skill integration: link only <own-user-extensible-skills-dir>/agent-guild to ~/.agent-guild/skills/agent-guild. Other skills stay in place. Also a fallback when full directory links are unsuitable.",
+      "preferred": true
     },
     {
       "tier": "copy",
@@ -210,20 +211,20 @@
     },
     {
       "tier": "readonly",
-      "last_resort": true,
-      "description": "Agent reads ~/.agent-guild/skills/agent-guild/SKILL.md directly each session, no local install. Won't appear in runtime's skill list but can still follow the protocol manually."
+      "last_resort": false,
+      "description": "Direct protocol access without local skill installation, also suitable for an initial memory trial. Read the central skill each session; report that automatic runtime triggering is unverified or unavailable. Write only where the runtime and user permit."
     }
   ],
   "guidance_for_joined_agents": {
-    "_note": "Once an agent has joined, it MUST treat the central directory as the default home for ALL user-facing persistent state, not just protocol files (escape hatch: runtime-forced private paths, noted in registry). This makes backup, sync, and migration trivial for the user.",
-    "where_to_persist_data": "If you (the agent OR a skill you load) need to persist data on this machine — caches, learned profiles, conversation logs, anything that should survive across sessions — MUST put it under ~/.agent-guild/skills_data/<skill-name>/ instead of inventing a private location elsewhere (escape hatch: runtime-forced private path). The user can then back up everything with one command.",
+    "_note": "Preserve the user's chosen sharing scope. Memory-only onboarding does not migrate runtime assets. For explicitly selected shared assets, use the locations below; existing full-center installations may continue unchanged.",
+    "where_to_persist_data": "For skill data the user chooses to share or back up with the guild, prefer ~/.agent-guild/skills_data/<skill-name>/. Keep intentionally separate, sensitive or runtime-managed data in the appropriate existing store; joining alone does not authorize importing it.",
     "where_to_install_mcp_servers": "If you install or configure an MCP server that should be shared with all joined agents (not bound to a single agent's runtime), MUST place its config under ~/.agent-guild/mcp/<server-name>/.",
     "where_to_drop_plugins": "Shared plugins (e.g. agent-agnostic browser/editor extensions) belong under ~/.agent-guild/plugins/<name>/.",
     "where_to_drop_tools": "Shared CLI scripts / utilities the user might run from any shell session belong under ~/.agent-guild/tools/<name>/.",
     "how_to_resolve_platform_tools": "Never hardcode a path under tools/ in shared files — a prebuilt binary lives on one platform only. Resolve with `ag tool <name>`: it prints the path for this device, or exits 3 with the install hint for this platform. Declare multi-platform payloads in tools/<name>/tool.json with binaries under tools/<name>/bin/<os>-<arch>/.",
-    "where_to_put_connector_credentials": "Connector credentials (login cookies, API keys, OAuth tokens, lock files) MUST go under ~/.agent-guild/connectors/<connector-name>/, NOT skills_data/ — skills_data/ is for skill user data. connectors/ is manually placed, never auto-adopted, and gitignored by default so credentials stay local to the machine.",
+    "where_to_put_connector_credentials": "Keep credentials out of shared memory and skills_data. Use the existing runtime or OS secret store. If the user explicitly chooses guild-managed connector state, connectors/<name>/ is a placement convention only: configure actual backup exclusions and filesystem permissions separately.",
     "naming": "Every subdirectory under skills/, skills_data/, and connectors/ MUST use a lowercase-hyphenated name ([a-z0-9-], e.g. qq-mail, agent-browser). No CJK characters, no spaces, no '-skill' suffix — the directory name is the identity, not a display label.",
-    "privacy_layering": "If a skill writes mixed-sensitivity data, split into ~/.agent-guild/skills_data/<skill>/public/ vs .../private/ so users can apply different .gitignore policies (see CONVENTIONS.md).",
+    "privacy_layering": "Separate mixed-sensitivity data into public/ and private/ to configure backup policies. These names are not access controls; .gitignore does not restrict agent reads or other sync services.",
     "device_scoped_facts": "Before persisting a fact, ask: would this still be true on another device? Yes -> shared files as usual. Only on the same OS+arch -> declare it per platform (tool.json / skill `platforms`). Only on this machine (absolute local paths, what is installed here) -> hosts/<host-id>/host-notes.md. See references/PORTABILITY.md.",
     "link_direction": "The guild owns its payloads. A link from inside the guild to an external path is a violation — every other device sees a dangling link. Move the payload into the guild and link the old external path back in (`ag port --apply`). Links that stay inside the guild use relative targets."
   },
@@ -234,14 +235,14 @@
     "Append-only logs, edit-in-place state",
     "Data hygiene is built-in: groom archives expired data, never deletes it (protocol 3.2+)",
     "Onboarding and runtime are decoupled — onboarding is a one-time action, the skill is an ongoing capability",
-    "Convention over framework: ≤200 LOC of code; the README is the product",
     "Self-onboarding: agents install themselves, the protocol does not push code to them",
     "Triggerable = done: install is only complete when the runtime can actually invoke the skill",
-    "Convention layer is default-on: skills/skills_data/mcp/plugins/tools are the default locations (escape hatch: runtime-forced private paths, noted in registry)",
     "Naming: lowercase-hyphenated ([a-z0-9-]) for every skills/ skills_data/ connectors/ subdir — no CJK, no spaces, no '-skill' suffix",
     "Scope before you store: a fact is shared (true on any device), platform (true for one os+arch), or host (true for this machine only) — protocol 3.3+",
     "The guild owns its payloads: links point into the guild, never out of it; intra-guild links are relative",
-    "No transport, no network: the directory is made safe to carry between devices, choosing the carrier stays the user's business"
+    "Shared-memory value first; asset consolidation is a separate user-selected choice",
+    "No built-in sync transport; optional version checks and update downloads follow UPGRADE.md",
+    "Keep durable facts distinct from work logs and preserve their source, date and scope"
   ],
   "supported_agents": [
     "Any AI agent that can read filesystem and follow natural-language instructions. Symlink support is preferred but not required (copy and readonly fallbacks exist)."
@@ -256,8 +257,8 @@
   ],
   "capability_disclosure": {
     "_note": "Every sensitive operation the CLI can perform, why it exists, and its boundary. Full detail with source locations in references/SECURITY.md.",
-    "data_location": "All data stays in ~/.agent-guild/ on the user's machine. No telemetry, no analytics, no phone-home, no account, no daemon.",
-    "network": "Only `ag upgrade`: version check against the public endpoints in VERSION_SOURCES, and downloading this project's own release archive under --apply. Requests carry no user data.",
+    "data_location": "The CLI stores plaintext locally and does not upload memory. No built-in encryption or per-agent ACLs; calling agent runtimes and user-chosen sync services have their own data handling.",
+    "network": "Public registry version checks on ag upgrade or rate-limited bootstrap (UPGRADE.md mode=check by default). mode=off disables bootstrap checks; mode=apply or upgrade --apply downloads this project's release. --no-maintenance bypasses bootstrap hooks. Requests contain no memory content.",
     "process_creation": "OS trash helpers (trash / trash-put / gio trash), PowerShell Recycle Bin, and `cmd /c mklink /J` when symlinks need elevation. Fixed argument vectors, never a shell string.",
     "temp_files": "Atomic writes (temp file in the same dir, then os.replace), upgrade staging, and probing whether this device supports symlinks. Concurrent appends to the same file (daily log, learning ledgers) are serialized with an advisory lock on a sidecar `.<name>.ag-lock` file (fcntl on POSIX, msvcrt on Windows), so two agents writing at the same moment cannot lose entries; lock files hold no data and stay next to their target inside ~/.agent-guild/.",
     "env_vars": "AGENT_GUILD_DIR, AG_AGENT, AG_HOST_ID, AG_PLATFORM, APPDATA, PREFIX, ANDROID_ROOT. No credentials are read.",
@@ -265,7 +266,7 @@
     "writes": "Inside ~/.agent-guild/. Outside it, only the links an agent asks for during adopt / link-root / port, which point back into the guild.",
     "permissions": "chmod +x on this project's own scripts/ag.py and scripts/install.sh after download.",
     "system_info": "OS tag, CPU architecture, hostname, Python version and link capability, used to tell devices apart. Written to hosts/<host-id>/host.json locally, never transmitted; AG_HOST_ID overrides the hostname.",
-    "file_moves": "adopt / link-root / port / groom consolidate assets and archive expired data. Dry-run by default, --apply required, verified after the move with rollback on failure, credentials excluded.",
+    "file_moves": "adopt / link-root / port preview by default and apply only within the selected scope. groom applies retention unless --dry-run; bootstrap may invoke it automatically unless --no-maintenance. Data is archived or moved to recoverable trash; credentials are excluded from adoption.",
     "instruction_shaped_text": "references/ONBOARDING.md documents a joining procedure in the imperative because it is a procedure. It runs only when the user asks to join, stated at the top of the file. The skill never asks an agent to conceal actions, bypass host confirmation, or escalate privileges."
   }
 }

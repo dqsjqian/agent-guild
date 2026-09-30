@@ -20,7 +20,8 @@ Commands:
                           abort with a pointer to `adopt --apply` first
   adopt [agent]           Scan agent home for adoptable assets (DRY-RUN report)
   adopt --apply [agent]   Move assets into the guild + link back
-  bootstrap               Print all shared context (identity/rules/projects/focus)
+  bootstrap [agent]      Print core shared context (identity/rules/projects/focus)
+                          --no-maintenance skips grooming and upgrade checks
   recall <kw> [...]       Search shared memory (identity/rules/projects/memory/
                           handoff/logs/learnings) — AND by default; --all = OR,
                           --limit N caps output (default 20); exit 1 if no hit
@@ -80,7 +81,7 @@ import tempfile
 import urllib.error
 import urllib.request
 import zipfile
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from datetime import datetime, timezone
 from fnmatch import fnmatch
 from pathlib import Path
@@ -484,10 +485,10 @@ def now_iso() -> str:
 
 
 def audit(action: str, detail: dict) -> None:
-    AUDIT.parent.mkdir(parents=True, exist_ok=True)
     line = json.dumps({"ts": now_iso(), "action": action, **detail}, ensure_ascii=False)
-    with AUDIT.open("a", encoding="utf-8") as f:
-        f.write(line + "\n")
+    with _append_lock(AUDIT):
+        with AUDIT.open("a", encoding="utf-8") as f:
+            f.write(line + "\n")
 
 
 def atomic_write_json(path: Path, data) -> None:
@@ -548,13 +549,18 @@ def _append_lock(path: Path):
 
 def atomic_append(path: Path, content: str) -> None:
     with _append_lock(path):
-        _session_path(path, write=True)
-        body = path.read_text(encoding="utf-8") if path.exists() else ""
-        existing = body.rstrip("\n")
-        fresh = content.rstrip("\n")
-        # A brand-new target must not start with a stray blank line.
-        body = (existing + "\n" + fresh if existing else fresh) + "\n"
-        _atomic_write_text(path, body)
+        _append_unlocked(path, content)
+
+
+def _append_unlocked(path: Path, content: str) -> None:
+    """Append while the caller holds `_append_lock(path)`. This lets ledger
+    ID allocation and the resulting write share one critical section."""
+    body = path.read_text(encoding="utf-8") if path.exists() else ""
+    existing = body.rstrip("\n")
+    fresh = content.rstrip("\n")
+    # A brand-new target must not start with a stray blank line.
+    body = (existing + "\n" + fresh if existing else fresh) + "\n"
+    _atomic_write_text(path, body)
 
 
 def load_registry() -> dict:
@@ -564,7 +570,8 @@ def load_registry() -> dict:
             "central_dir": "~/.agent-guild/",
             "agents": {},
         }
-    return json.loads(REGISTRY.read_text(encoding="utf-8"))
+    # Windows PowerShell 5.1's UTF8 writer adds a BOM to legacy registries.
+    return json.loads(REGISTRY.read_text(encoding="utf-8-sig"))
 
 
 def save_registry(data: dict, agent: str, action: str) -> None:
@@ -730,8 +737,9 @@ def cmd_link_root(args: list) -> int:
     skill is instantly visible to the runtime — zero per-skill maintenance.
 
     Safety model (never loses data):
-      - links pointing into the guild  -> moved to trash (dir link replaces them)
-      - links pointing elsewhere      -> moved INTO ~/.agent-guild/skills/
+      - links matching guild names/targets -> removed (dir link replaces them)
+      - links without a guild counterpart  -> recreated with the same target
+      - links conflicting with guild names -> abort: resolve the conflict first
       - real adoptable skills         -> abort: run `ag adopt --apply` first
       - host-wired / platform items   -> abort: keep the per-skill tier
     """
@@ -786,8 +794,8 @@ def cmd_link_root(args: list) -> int:
         return 0
 
     # Case 2: existing real directory — classify every child
-    guild_resolved = guild.resolve()
     trash_items, move_items, adopt_items, block_items = [], [], [], []
+    link_conflicts, link_targets = [], {}
     try:
         children = sorted(root.iterdir())
     except OSError as e:
@@ -795,16 +803,25 @@ def cmd_link_root(args: list) -> int:
         return 1
     for child in children:
         if is_link(child):
-            # A link is redundant if the guild already owns that name (either
-            # the link points straight into skills/, or skills/<name> exists
-            # and only resolves further out, e.g. a source-repo symlink).
-            try:
-                inside = child.resolve().parent == guild_resolved
-            except OSError:
-                inside = False
+            # The directory link replaces a child only when the SAME name
+            # resolves to the SAME target. A differently named guild alias
+            # still needs preserving; an unrelated same-name item conflicts.
             dest = guild / child.name
-            redundant = inside or dest.exists() or is_link(dest)
-            (trash_items if redundant else move_items).append(child)
+            try:
+                try:
+                    target = child.resolve(strict=True)
+                except FileNotFoundError:
+                    # Preserve dangling links too, but do not accept loops
+                    # (non-strict resolve ignores ELOOP on recent Python).
+                    target = child.resolve()
+                if dest.exists() or is_link(dest):
+                    (trash_items if target == dest.resolve()
+                     else link_conflicts).append(child)
+                else:
+                    move_items.append(child)
+                    link_targets[child] = target
+            except (OSError, RuntimeError):
+                link_conflicts.append(child)
         elif child.name == ".DS_Store":
             trash_items.append(child)
         elif (child.is_dir() and (child / "SKILL.md").is_file()
@@ -826,8 +843,14 @@ def cmd_link_root(args: list) -> int:
         print(f"{'ADOPT FIRST (blocks)':<28} {c.name}")
     for c in block_items:
         print(f"{'CANNOT MOVE (blocks)':<28} {c.name}")
+    for c in link_conflicts:
+        print(f"{'LINK CONFLICT (blocks)':<28} {c.name} -> {link_target(c)}")
     print("-" * 78)
 
+    if link_conflicts:
+        print("Resolve conflicting or unresolvable links before consolidating; "
+              "no items were changed.")
+        return 1
     if adopt_items:
         print(f"{len(adopt_items)} real skill(s) still live outside the guild.")
         print("Run `ag adopt " + agent + " --apply` first, then retry link-root.")
@@ -849,17 +872,19 @@ def cmd_link_root(args: list) -> int:
     for c in move_items:
         dest = guild / c.name
         if dest.exists() or is_link(dest):
-            # The guild already owns this name — the runtime-side link is
-            # redundant, recoverable-delete it.
-            if not to_trash(c):
-                print(f"FAILED to trash redundant link {c} — aborted")
-                return 1
-        else:
-            try:
-                shutil.move(str(c), str(dest))
-            except OSError as e:
-                print(f"FAILED to move {c} into the guild: {e} — aborted")
-                return 1
+            print(f"FAILED: {dest} appeared after planning — aborted")
+            return 1
+        # Moving a relative symlink verbatim changes its meaning. Create a
+        # replacement using the target resolved at the original location,
+        # then remove only the original link (also safe for junctions).
+        ok, how = make_link(dest, link_targets[c])
+        if not ok:
+            print(f"FAILED to link {dest}: {how} — original link kept")
+            return 1
+        if not drop_link(c):
+            drop_link(dest)
+            print(f"FAILED to remove {c} — original link kept")
+            return 1
     leftover = list(root.iterdir())
     if leftover:
         print(f"refusing to link: {root} is not empty after planning "
@@ -1047,8 +1072,7 @@ def write_runtime_version(proto: str, skill: str) -> None:
 
 
 def current_versions(skill_src: Path) -> Tuple[str, str]:
-    """(protocol_version, skill_version) of the skill package `ag` runs from —
-    i.e. the newest version the user has at hand."""
+    """(protocol_version, skill_version) declared by a skill package."""
     m = skill_src / "manifest.json"
     if m.is_file():
         try:
@@ -1101,18 +1125,19 @@ def cmd_init(args: list) -> int:
 
     for rel, body in PLACEHOLDERS.items():
         p = CENTRAL / rel
-        if not p.exists():
-            p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_text(body, encoding="utf-8")
-            created_files.append(rel)
+        with _append_lock(p):
+            if not p.exists():
+                _atomic_write_text(p, body)
+                created_files.append(rel)
 
-    if not REGISTRY.exists():
-        atomic_write_json(REGISTRY, {
-            "protocol_version": PROTOCOL_VERSION,
-            "central_dir": "~/.agent-guild/",
-            "agents": {},
-        })
-        created_files.append("registry.json")
+    with _append_lock(REGISTRY):
+        if not REGISTRY.exists():
+            atomic_write_json(REGISTRY, {
+                "protocol_version": PROTOCOL_VERSION,
+                "central_dir": "~/.agent-guild/",
+                "agents": {},
+            })
+            created_files.append("registry.json")
 
     # Claim this device (protocol 3.3+). host.json is the device's own record;
     # host-notes.md is where the user keeps facts that are true HERE only.
@@ -1149,22 +1174,28 @@ def cmd_init(args: list) -> int:
         created_files.append(f"hosts/{facts['host_id']}/{HOST_NOTES}")
 
     # Make sure the protocol's own skill is present AND current in the bus.
-    # Version-aware self-heal: compare the version this `ag` runs from against
-    # the installed anchor (~/.agent-guild/VERSION). If the user upgraded the
-    # skill and re-ran init, refresh protocol-owned files (skill package + root
-    # docs) while leaving ALL user data (identity/rules/log/handoff/skills_data/
-    # connectors/memory/registry) untouched.
+    # Compare against the installed package itself: an older runtime copy may
+    # run init after another agent upgraded the guild, and its anchor can lag.
+    # Refresh protocol-owned files only forwards, leaving all user data alone.
     own_skill = CENTRAL / "skills" / "agent-guild"
     skill_src = Path(__file__).resolve().parent.parent  # .../skills/agent-guild
     cur_proto, cur_skill = current_versions(skill_src)
-    inst = read_runtime_version()
-    inst_proto = inst.get("protocol_version", "")
-    inst_skill = inst.get("skill_version", "")
-
+    anchor = read_runtime_version()
     skill_missing = not (own_skill / "SKILL.md").exists()
+    inst_proto = anchor.get("protocol_version", "") if not skill_missing else ""
+    inst_skill = anchor.get("skill_version", "") if not skill_missing else ""
+    if not skill_missing:
+        package_proto, package_skill = current_versions(own_skill)
+        if package_skill != "0":
+            inst_proto, inst_skill = package_proto, package_skill
+
+    source_older = ((bool(inst_skill) and _version_gt(inst_skill, cur_skill))
+                    or (bool(inst_proto) and _version_gt(inst_proto, cur_proto)))
     skill_outdated = bool(inst_skill) and _version_gt(cur_skill, inst_skill)
-    proto_changed = bool(inst_proto) and inst_proto != cur_proto
-    upgrading = skill_outdated or proto_changed
+    proto_outdated = bool(inst_proto) and _version_gt(cur_proto, inst_proto)
+    upgrading = not source_older and (skill_outdated or proto_outdated)
+    applied_proto, applied_skill = inst_proto or cur_proto, inst_skill or cur_skill
+    refresh_docs = False
 
     skill_status = "already current"
     if skill_missing:
@@ -1172,18 +1203,33 @@ def cmd_init(args: list) -> int:
             own_skill.parent.mkdir(parents=True, exist_ok=True)
             shutil.copytree(skill_src, own_skill, dirs_exist_ok=True)
             skill_status = "installed"
+            applied_proto, applied_skill = cur_proto, cur_skill
+            refresh_docs = True
         else:
             skill_status = "MISSING — copy the agent-guild skill package into skills/agent-guild/"
     elif upgrading:
         if skill_src.resolve() != own_skill.resolve() and (skill_src / "SKILL.md").is_file():
             _replace_tree(skill_src, own_skill)
             skill_status = f"upgraded {inst_skill or '?'} → {cur_skill}"
+            applied_proto, applied_skill = cur_proto, cur_skill
+            refresh_docs = True
         else:
-            skill_status = f"anchor bumped to {cur_skill}"
-    elif not inst_skill:
+            skill_status = "kept installed package — upgrade source unavailable"
+    elif source_older:
+        skill_status = f"kept newer installed version {inst_skill}"
+    elif (anchor.get("skill_version") != applied_skill
+          or anchor.get("protocol_version") != applied_proto):
         skill_status = "anchor repaired"
 
-    write_runtime_version(cur_proto, cur_skill)
+    # An in-place package update can already be newer than its anchor. Repair
+    # the anchor and docs from that installed package, never from an old copy.
+    refresh_docs = refresh_docs or any(
+        old and _version_gt(new, old) for new, old in (
+            (applied_skill, anchor.get("skill_version", "")),
+            (applied_proto, anchor.get("protocol_version", "")),
+        )
+    )
+    write_runtime_version(applied_proto, applied_skill)
 
     # Seed / refresh the root protocol docs. First run seeds them; an upgrade
     # follows the version; when already current they are left alone.
@@ -1193,7 +1239,7 @@ def cmd_init(args: list) -> int:
     for doc in PROTOCOL_DOCS:
         target = CENTRAL / doc
         src = None
-        for base in (own_skill, skill_src):
+        for base in ((own_skill,) if source_older else (own_skill, skill_src)):
             for sub in DOC_DIRS:
                 cand = base / sub / doc
                 if cand.is_file():
@@ -1207,22 +1253,24 @@ def cmd_init(args: list) -> int:
         if not target.exists():
             target.write_text(body, encoding="utf-8")
             created_files.append(doc)
-        elif upgrading and target.read_text(encoding="utf-8") != body:
+        elif refresh_docs and target.read_text(encoding="utf-8") != body:
             target.write_text(body, encoding="utf-8")
             created_files.append(doc)
 
     audit("init", {"agent": agent, "fresh": fresh, "dirs": len(created_dirs)})
 
     print(f"{'initialized' if fresh else 'verified'} {CENTRAL}")
-    print(f"  protocol_version : {cur_proto}")
-    print(f"  skill_version    : {cur_skill}")
+    print(f"  protocol_version : {applied_proto}")
+    print(f"  skill_version    : {applied_skill}")
     print(f"  this device      : {facts['host_id']} "
           f"({facts['platform']}, links={facts['links']})")
     print(f"  dirs created     : {len(created_dirs)}" + (f" ({', '.join(created_dirs)})" if created_dirs else ""))
     print(f"  files created    : {len(created_files)}" + (f" ({', '.join(created_files)})" if created_files else ""))
     print(f"  own skill        : {skill_status}")
     print()
-    print("Next: `ag adopt <agent>` to see what can move in, then `ag register`.")
+    print("Next: `ag bootstrap <agent>` to read context; close with `ag finish <agent>` "
+          "(summary via stdin). Use `ag recall <keyword>` to find it later.")
+    print("Optional: see ONBOARDING.md to register an agent or share skills and tools.")
     return 0
 
 
@@ -1586,14 +1634,23 @@ def cmd_adopt(args: list) -> int:
 BOOTSTRAP_FILES = [
     ("identity/profile.md", "WHO THE USER IS"),
     ("identity/ROUTINE.md", "ROUTINE"),
-    ("rules/universal.md", "UNIVERSAL RULES (highest priority)"),
+    ("rules/universal.md", "SHARED RULES (user-authored)"),
     ("projects/active.md", "ACTIVE PROJECTS"),
     ("handoff/shared-state/current-focus.md", "CURRENT FOCUS"),
 ]
 
 
+def _inbox_messages(agent: str) -> list:
+    """List message files, leaving persistent lock sidecars in place."""
+    if not INBOX.is_dir():
+        return []
+    return [f for f in sorted(INBOX.iterdir())
+            if f.is_file() and f.suffix == ".md" and not f.name.startswith(".")
+            and f"-to-{agent}-" in f.name]
+
+
 def cmd_bootstrap(args: list) -> int:
-    """Dump all shared session context in one shot (read-only)."""
+    """Read shared context, with policy-controlled maintenance by default."""
     if not CENTRAL.exists():
         print(f"{CENTRAL} missing — run `ag init` first", file=sys.stderr)
         return 1
@@ -1625,8 +1682,7 @@ def cmd_bootstrap(args: list) -> int:
 
     # Unread inbox for this agent
     if INBOX.is_dir():
-        mine = [f.name for f in sorted(INBOX.iterdir())
-                if f.is_file() and f"-to-{agent}-" in f.name]
+        mine = [f.name for f in _inbox_messages(agent)]
         print(f"\n{'=' * 78}\n== INBOX for {agent}\n{'=' * 78}")
         print("\n".join(f"  {m}" for m in mine) if mine else "  (empty)")
 
@@ -1660,11 +1716,13 @@ def cmd_bootstrap(args: list) -> int:
 
     # Data hygiene (protocol 3.2+): rate-limited auto-groom so the guild never
     # slowly rots. Prints only when something was found; never fails.
-    maybe_auto_groom(agent)
+    if "--no-maintenance" not in args:
+        maybe_auto_groom(agent)
 
     # Upgrade self-check (3.9.0+): once per interval_hours, compare against
     # the published version; mode=apply installs it. Policy: UPGRADE.md.
-    maybe_auto_upgrade(agent)
+    if "--no-maintenance" not in args:
+        maybe_auto_upgrade(agent)
     return 0
 
 
@@ -1748,17 +1806,18 @@ def _touch_last_seen(name: str) -> bool:
     """Refresh an agent's presence stamps (shared + this device's block).
     Returns False when the agent is not registered — caller decides whether
     that is fatal."""
-    data = load_registry()
-    agents = data.setdefault("agents", {})
-    if name not in agents:
-        return False
-    hid, stamp = host_id(), now_iso()
-    entry = agents[name]
-    fold_entry_to_host(entry, hid)
-    entry.setdefault("hosts", {}).setdefault(hid, {})["last_seen"] = stamp
-    entry["last_seen"] = stamp
-    entry["mirror_host"] = hid
-    save_registry(data, name, "last_seen")
+    with _append_lock(REGISTRY):
+        data = load_registry()
+        agents = data.setdefault("agents", {})
+        if name not in agents:
+            return False
+        hid, stamp = host_id(), now_iso()
+        entry = agents[name]
+        fold_entry_to_host(entry, hid)
+        entry.setdefault("hosts", {}).setdefault(hid, {})["last_seen"] = stamp
+        entry["last_seen"] = stamp
+        entry["mirror_host"] = hid
+        save_registry(data, name, "last_seen")
     return True
 
 
@@ -1788,16 +1847,25 @@ def cmd_finish(args: list) -> int:
 
     # 3) inbox: report pending, or archive what this agent has now processed
     #    (SPEC 3.6: recipient moves a handled message to handoff/archive/)
-    mine = []
-    if INBOX.is_dir():
-        mine = [f for f in sorted(INBOX.iterdir())
-                if f.is_file() and f"-to-{agent}-" in f.name]
+    mine = _inbox_messages(agent)
     archived = 0
     if mine and archive_inbox:
         archive_dir = _session_path("handoff/archive", write=True)
         for f in mine:
-            shutil.move(str(f), str(archive_dir / f.name))
-        archived = len(mine)
+            # Match send's lock so a pending append cannot land in a file
+            # being moved. Keep its sidecar stable for later senders.
+            with _append_lock(f):
+                if not f.is_file():
+                    continue  # another finish already archived this message
+                with _append_lock(archive_dir):
+                    archive_dir.mkdir(parents=True, exist_ok=True)
+                    dest = archive_dir / f.name
+                    suffix = 1
+                    while dest.exists() or dest.is_symlink():
+                        dest = archive_dir / f"{f.stem}-{suffix}{f.suffix}"
+                        suffix += 1
+                    shutil.move(str(f), str(dest))
+                archived += 1
         print(f"archived {archived} inbox message(s) -> handoff/archive/")
     elif mine:
         print(f"{len(mine)} inbox message(s) still pending — process them, "
@@ -2476,22 +2544,23 @@ def cmd_port(args: list) -> int:
             todo.append(f"move {src.name} -> hosts/{hid}/{new_name}")
 
     print("\n== registry scoping ==")
-    reg = load_registry()
     changed = []
-    for name, entry in reg.get("agents", {}).items():
-        hosts = entry.get("hosts")
-        if isinstance(hosts, dict) and hosts:
-            continue
-        if apply_:
-            if fold_entry_to_host(entry, hid):
-                changed.append(name)
-        else:
-            todo.append(f"fold device paths of '{name}' into hosts.{hid}")
-    if apply_ and changed:
-        reg["protocol_version"] = PROTOCOL_VERSION
-        save_registry(reg, "port", "port_registry")
-        did.append(f"scoped {len(changed)} registry entry(ies) to {hid}: "
-                   + ", ".join(changed))
+    with _append_lock(REGISTRY) if apply_ else nullcontext():
+        reg = load_registry()
+        for name, entry in reg.get("agents", {}).items():
+            hosts = entry.get("hosts")
+            if isinstance(hosts, dict) and hosts:
+                continue
+            if apply_:
+                if fold_entry_to_host(entry, hid):
+                    changed.append(name)
+            else:
+                todo.append(f"fold device paths of '{name}' into hosts.{hid}")
+        if apply_ and changed:
+            reg["protocol_version"] = PROTOCOL_VERSION
+            save_registry(reg, "port", "port_registry")
+            did.append(f"scoped {len(changed)} registry entry(ies) to {hid}: "
+                       + ", ".join(changed))
     if not changed and not any(t.startswith("fold ") for t in todo):
         print("  ok — every entry is already device-scoped")
 
@@ -2611,24 +2680,25 @@ def cmd_register(args: list) -> int:
     caps = args[4:] or ["read_files", "write_files"]
     hid = host_id()
     stamp = now_iso()
-    data = load_registry()
-    data.setdefault("agents", {})
-    entry = data["agents"].get(name, {})
-    entry.update(
-        joined_at=entry.get("joined_at", stamp),
-        protocol_version=PROTOCOL_VERSION,
-        capabilities=caps,
-    )
-    # device-scoped facts
-    block = dict(host_block(entry, hid))
-    block.update(home=home, skills_root=skills_root,
-                 install_tier=tier, last_seen=stamp)
-    entry.setdefault("hosts", {})[hid] = block
-    # compat mirror for pre-3.3 readers on this same device
-    entry.update(home=home, skills_root=skills_root, install_tier=tier,
-                 last_seen=stamp, mirror_host=hid)
-    data["agents"][name] = entry
-    save_registry(data, name, "register")
+    with _append_lock(REGISTRY):
+        data = load_registry()
+        data.setdefault("agents", {})
+        entry = data["agents"].get(name, {})
+        entry.update(
+            joined_at=entry.get("joined_at", stamp),
+            protocol_version=PROTOCOL_VERSION,
+            capabilities=caps,
+        )
+        # device-scoped facts
+        block = dict(host_block(entry, hid))
+        block.update(home=home, skills_root=skills_root,
+                     install_tier=tier, last_seen=stamp)
+        entry.setdefault("hosts", {})[hid] = block
+        # compat mirror for pre-3.3 readers on this same device
+        entry.update(home=home, skills_root=skills_root, install_tier=tier,
+                     last_seen=stamp, mirror_host=hid)
+        data["agents"][name] = entry
+        save_registry(data, name, "register")
     print(f"registered {name} (tier={tier}, protocol={PROTOCOL_VERSION}, host={hid})")
     return 0
 
@@ -2686,21 +2756,11 @@ def cmd_focus(args: list) -> int:
     body = read_stdin()
     block = (f"> Last updated: {now_iso()} by {agent} @{host_id()}\n\n"
              f"## {title}\n\n{body}\n\n---\n")
-    existing = FOCUS.read_text(encoding="utf-8") if FOCUS.exists() else ""
-    existing = re.sub(r"^#\s*Current Focus\s*\n+", "", existing.lstrip())
-    new = "# Current Focus\n\n" + block + existing
-    FOCUS.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=str(FOCUS.parent), prefix=".ag-", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(new)
-        os.replace(tmp, FOCUS)
-    except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
+    with _append_lock(FOCUS):
+        existing = FOCUS.read_text(encoding="utf-8") if FOCUS.exists() else ""
+        existing = re.sub(r"^#\s*Current Focus\s*\n+", "", existing.lstrip())
+        new = "# Current Focus\n\n" + block + existing
+        _atomic_write_text(FOCUS, new)
     audit("focus", {"agent": agent, "title": title})
     print(f"current-focus updated by {agent}")
     return 0
@@ -2784,26 +2844,7 @@ def cmd_learn(args: list) -> int:
         print(f"{CENTRAL} missing — run `ag init` first", file=sys.stderr)
         return 1
 
-    rel, prefix = LEDGERS[kind]
-    path = CENTRAL / rel
-    if not path.exists():  # older central dir — back-fill header
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(PLACEHOLDERS.get(rel, "# ledger\n\n---\n"), encoding="utf-8")
-
-    # Recurrence detection: same Pattern-Key logged before?
-    see_also = ""
-    if pattern_key and path.exists():
-        prior = [e["id"] for e in _parse_entries(path.read_text(encoding="utf-8"))
-                 if re.search(rf"Pattern-Key:\s*{re.escape(pattern_key)}\s*$",
-                              e["block"], re.M)]
-        if prior:
-            see_also = ", ".join(prior)
-            print(f"recurrence: Pattern-Key '{pattern_key}' seen in {see_also} "
-                  f"— linking via See Also; promotion threshold may now be met (ag review).")
-
-    entry_id = _next_id(path, prefix)
     body = read_stdin() or "(no details provided)"
-
     if kind == "error":
         detail = f"### Error\n```\n{body}\n```"
     elif kind == "featreq":
@@ -2813,34 +2854,50 @@ def cmd_learn(args: list) -> int:
         if not category:
             category = "insight"
 
-    meta = [f"- Source: conversation",
-            f"- Related Files: ",
-            f"- Tags: "]
-    if see_also:
-        meta.append(f"- See Also: {see_also}")
-    if pattern_key:
-        meta.append(f"- Pattern-Key: {pattern_key}")
-
     if kind == "learning":
         heading_cat = category or "insight"
     elif kind == "error":
         heading_cat = category or "error"
     else:
         heading_cat = category or "request"
-    entry = (
-        f"\n## [{entry_id}] {heading_cat}\n\n"
-        f"**Logged**: {now_iso()}\n"
-        f"**By**: {agent}\n"
-        f"**Host**: {host_id()}\n"
-        f"**Priority**: {priority}\n"
-        f"**Status**: pending\n"
-        f"**Area**: {area or 'unspecified'}\n\n"
-        f"### Summary\n{summary}\n\n"
-        f"{detail}\n\n"
-        f"### Suggested Action\n(none yet)\n\n"
-        f"### Metadata\n" + "\n".join(meta) + "\n\n---\n"
-    )
-    atomic_append(path, entry)
+    rel, prefix = LEDGERS[kind]
+    path = CENTRAL / rel
+    with _append_lock(path):
+        if not path.exists():  # older central dir — back-fill header
+            _atomic_write_text(path, PLACEHOLDERS.get(rel, "# ledger\n\n---\n"))
+
+        # Allocate the ID from the same snapshot that this append updates.
+        # Locking only the final append allows concurrent callers to reuse it.
+        entry_id = _next_id(path, prefix)
+        see_also = ""
+        if pattern_key:
+            prior = [e["id"] for e in _parse_entries(path.read_text(encoding="utf-8"))
+                     if re.search(rf"Pattern-Key:\s*{re.escape(pattern_key)}\s*$",
+                                  e["block"], re.M)]
+            if prior:
+                see_also = ", ".join(prior)
+                print(f"recurrence: Pattern-Key '{pattern_key}' seen in {see_also} "
+                      f"— linking via See Also; promotion threshold may now be met (ag review).")
+
+        meta = ["- Source: conversation", "- Related Files: ", "- Tags: "]
+        if see_also:
+            meta.append(f"- See Also: {see_also}")
+        if pattern_key:
+            meta.append(f"- Pattern-Key: {pattern_key}")
+        entry = (
+            f"\n## [{entry_id}] {heading_cat}\n\n"
+            f"**Logged**: {now_iso()}\n"
+            f"**By**: {agent}\n"
+            f"**Host**: {host_id()}\n"
+            f"**Priority**: {priority}\n"
+            f"**Status**: pending\n"
+            f"**Area**: {area or 'unspecified'}\n\n"
+            f"### Summary\n{summary}\n\n"
+            f"{detail}\n\n"
+            f"### Suggested Action\n(none yet)\n\n"
+            f"### Metadata\n" + "\n".join(meta) + "\n\n---\n"
+        )
+        _append_unlocked(path, entry)
     audit("learn", {"agent": agent, "id": entry_id, "kind": kind,
                     "pattern_key": pattern_key or None})
     print(f"logged {entry_id} -> {rel} (by {agent}, priority={priority})")
@@ -2859,33 +2916,31 @@ def cmd_resolve(args: list) -> int:
     agent = os.environ.get("AG_AGENT") or "unknown"
 
     for path in _ledger_files():
-        if not path.exists():
-            continue
-        text = path.read_text(encoding="utf-8")
-        entries = _parse_entries(text)
-        for e in entries:
-            if e["id"] != entry_id:
+        with _append_lock(path):
+            if not path.exists():
                 continue
-            block = e["block"]
-            if "**Status**: resolved" in block:
-                print(f"{entry_id} is already resolved")
+            text = path.read_text(encoding="utf-8")
+            entries = _parse_entries(text)
+            for e in entries:
+                if e["id"] != entry_id:
+                    continue
+                block = e["block"]
+                if "**Status**: resolved" in block:
+                    print(f"{entry_id} is already resolved")
+                    return 0
+                new_block, n = re.subn(r"^\*\*Status\*\*:\s*\S+",
+                                       "**Status**: resolved", block, count=1, flags=re.M)
+                if n == 0:
+                    new_block = block.replace("### Summary",
+                                              "**Status**: resolved\n\n### Summary", 1)
+                new_block = new_block.rstrip("\n") + (
+                    f"\n\n### Resolution\n- **Resolved**: {now_iso()}\n"
+                    f"- **By**: {agent}\n- **Notes**: {note}\n\n---\n")
+                new_text = text.replace(block, new_block, 1)
+                _atomic_write_text(path, new_text)
+                audit("resolve", {"agent": agent, "id": entry_id})
+                print(f"resolved {entry_id} in {path.relative_to(CENTRAL)}")
                 return 0
-            new_block, n = re.subn(r"^\*\*Status\*\*:\s*\S+",
-                                   "**Status**: resolved", block, count=1, flags=re.M)
-            if n == 0:
-                new_block = block.replace("### Summary",
-                                          "**Status**: resolved\n\n### Summary", 1)
-            new_block = new_block.rstrip("\n") + (
-                f"\n\n### Resolution\n- **Resolved**: {now_iso()}\n"
-                f"- **By**: {agent}\n- **Notes**: {note}\n\n---\n")
-            new_text = text.replace(block, new_block, 1)
-            fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".ag-", suffix=".tmp")
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                f.write(new_text)
-            os.replace(tmp, path)
-            audit("resolve", {"agent": agent, "id": entry_id})
-            print(f"resolved {entry_id} in {path.relative_to(CENTRAL)}")
-            return 0
     print(f"entry '{entry_id}' not found in any ledger "
           f"(searched learnings/*.md)", file=sys.stderr)
     return 1
@@ -3045,101 +3100,109 @@ def _groom(cfg: dict, dry_run: bool = False):
 
     # -- 2. rotate stale current-focus blocks -> shared-state/archive/ -----
     if FOCUS.is_file():
-        text = FOCUS.read_text(encoding="utf-8")
-        header, blocks = _split_focus(text)
-        cutoff = now.timestamp() - cfg["focus_days"] * 86400
-        keep_idx, drop_idx = [], []
-        for i, b in enumerate(blocks):
-            if b["ts"] and b["ts"].timestamp() < cutoff:
-                drop_idx.append(i)
-            else:
-                keep_idx.append(i)
-        # count cap: beyond focus_blocks live blocks, rotate the OLDEST
-        # timestamped ones (tail of the list); timestamp-less blocks never move
-        if len(keep_idx) > cfg["focus_blocks"]:
-            excess = len(keep_idx) - cfg["focus_blocks"]
-            moved = []
-            for i in reversed(keep_idx):
-                if excess <= 0:
-                    break
-                if blocks[i]["ts"]:
-                    moved.append(i)
-                    excess -= 1
-            if moved:
-                drop_idx += moved
-                drop_idx.sort()
-                moved_set = set(moved)
-                keep_idx = [i for i in keep_idx if i not in moved_set]
-        if drop_idx:
-            bucket = (CENTRAL / "handoff" / "shared-state" / "archive"
-                      / f"current-focus-{now:%Y-%m}.md")
-            drop_set = set(drop_idx)
-            arch_body = "".join(blocks[i]["text"] for i in drop_idx)
-            kept_text = header
+        with _append_lock(FOCUS) if not dry_run else nullcontext():
+            text = FOCUS.read_text(encoding="utf-8")
+            header, blocks = _split_focus(text)
+            cutoff = now.timestamp() - cfg["focus_days"] * 86400
+            keep_idx, drop_idx = [], []
             for i, b in enumerate(blocks):
-                if i in drop_set:
-                    kept_text += b.get("tail", "")  # hand-written tail stays live
+                if b["ts"] and b["ts"].timestamp() < cutoff:
+                    drop_idx.append(i)
                 else:
-                    kept_text += b["text"] + b.get("tail", "")
-            span = f"({len(keep_idx)} kept)"
-            if dry_run:
-                acts.append(f"would archive {len(drop_idx)} focus block(s) -> "
-                            f"shared-state/archive/ {span}")
-            else:
-                atomic_append(bucket, arch_body)
-                _atomic_write_text(FOCUS, kept_text)
-                acts.append(f"archived {len(drop_idx)} focus block(s) -> "
-                            f"handoff/shared-state/archive/current-focus-{now:%Y-%m}.md {span}")
+                    keep_idx.append(i)
+            # count cap: beyond focus_blocks live blocks, rotate the OLDEST
+            # timestamped ones (tail of the list); timestamp-less blocks never move
+            if len(keep_idx) > cfg["focus_blocks"]:
+                excess = len(keep_idx) - cfg["focus_blocks"]
+                moved = []
+                for i in reversed(keep_idx):
+                    if excess <= 0:
+                        break
+                    if blocks[i]["ts"]:
+                        moved.append(i)
+                        excess -= 1
+                if moved:
+                    drop_idx += moved
+                    drop_idx.sort()
+                    moved_set = set(moved)
+                    keep_idx = [i for i in keep_idx if i not in moved_set]
+            if drop_idx:
+                bucket = (CENTRAL / "handoff" / "shared-state" / "archive"
+                          / f"current-focus-{now:%Y-%m}.md")
+                drop_set = set(drop_idx)
+                arch_body = "".join(blocks[i]["text"] for i in drop_idx)
+                kept_text = header
+                for i, b in enumerate(blocks):
+                    if i in drop_set:
+                        kept_text += b.get("tail", "")  # hand-written tail stays live
+                    else:
+                        kept_text += b["text"] + b.get("tail", "")
+                span = f"({len(keep_idx)} kept)"
+                if dry_run:
+                    acts.append(f"would archive {len(drop_idx)} focus block(s) -> "
+                                f"shared-state/archive/ {span}")
+                else:
+                    atomic_append(bucket, arch_body)
+                    _atomic_write_text(FOCUS, kept_text)
+                    acts.append(f"archived {len(drop_idx)} focus block(s) -> "
+                                f"handoff/shared-state/archive/current-focus-{now:%Y-%m}.md {span}")
 
     # -- 3. compact resolved ledger entries -> learnings/archive/ ----------
     for path in _ledger_files():
-        if not path.exists():
-            continue
-        text = path.read_text(encoding="utf-8")
-        entries = _parse_entries(text)
-        if not entries:
-            continue
-        keep_e, drop_e = [], []
-        for e in entries:
-            st = _field(e, "Status")
-            logged = _parse_iso(_field(e, "Logged"))
-            if (st in ("resolved", "wont_fix", "promoted", "promoted_to_skill")
-                    and logged and (now - logged).days > cfg["ledger_resolved_days"]):
-                drop_e.append(e)
-            else:
-                keep_e.append(e)
-        if drop_e:
-            if dry_run:
-                acts.append(f"would compact {len(drop_e)} resolved entrie(s) "
-                            f"from {path.name} -> learnings/archive/")
-            else:
-                arcdir = LEARNINGS / "archive"
-                arcdir.mkdir(parents=True, exist_ok=True)
-                atomic_append(arcdir / path.name,
-                              "\n".join(e["block"].rstrip("\n") for e in drop_e) + "\n")
-                first = _ENTRY_RE.search(text)
-                prefix = text[:first.start()] if first else text
-                _atomic_write_text(path, prefix + "".join(e["block"] for e in keep_e))
-                acts.append(f"compacted {len(drop_e)} resolved entrie(s) from "
-                            f"{path.name} -> learnings/archive/{path.name} "
-                            f"({len(keep_e)} live)")
+        with _append_lock(path) if not dry_run else nullcontext():
+            if not path.exists():
+                continue
+            text = path.read_text(encoding="utf-8")
+            entries = _parse_entries(text)
+            if not entries:
+                continue
+            keep_e, drop_e = [], []
+            for e in entries:
+                st = _field(e, "Status")
+                logged = _parse_iso(_field(e, "Logged"))
+                if (st in ("resolved", "wont_fix", "promoted", "promoted_to_skill")
+                        and logged and (now - logged).days > cfg["ledger_resolved_days"]):
+                    drop_e.append(e)
+                else:
+                    keep_e.append(e)
+            if drop_e:
+                if dry_run:
+                    acts.append(f"would compact {len(drop_e)} resolved entrie(s) "
+                                f"from {path.name} -> learnings/archive/")
+                else:
+                    arcdir = LEARNINGS / "archive"
+                    arcdir.mkdir(parents=True, exist_ok=True)
+                    atomic_append(arcdir / path.name,
+                                  "\n".join(e["block"].rstrip("\n") for e in drop_e) + "\n")
+                    first = _ENTRY_RE.search(text)
+                    prefix = text[:first.start()] if first else text
+                    _atomic_write_text(path, prefix + "".join(e["block"] for e in keep_e))
+                    acts.append(f"compacted {len(drop_e)} resolved entrie(s) from "
+                                f"{path.name} -> learnings/archive/{path.name} "
+                                f"({len(keep_e)} live)")
 
     # -- 4. rotate the audit trail ------------------------------------------
     if AUDIT.exists():
-        lines = [l for l in AUDIT.read_text(encoding="utf-8").splitlines() if l.strip()]
-        if len(lines) > cfg["audit_max_lines"]:
-            keep_n = min(cfg["audit_keep_lines"], len(lines) - 1)
-            head, tail = lines[:-keep_n] if keep_n else lines, lines[-keep_n:] if keep_n else []
-            if head:
-                if dry_run:
-                    acts.append(f"would rotate audit.jsonl: {len(head)} old line(s) -> log/archive/")
-                else:
-                    log_archive.mkdir(parents=True, exist_ok=True)
-                    (log_archive / f"audit-{now:%Y%m%d-%H%M%S}.jsonl").write_text(
-                        "\n".join(head) + "\n", encoding="utf-8")
-                    _atomic_write_text(AUDIT, "\n".join(tail) + "\n")
-                    acts.append(f"rotated audit.jsonl: {len(head)} old line(s) -> "
-                                f"log/archive/, {len(tail)} kept")
+        with _append_lock(AUDIT) if not dry_run else nullcontext():
+            lines = [l for l in AUDIT.read_text(encoding="utf-8").splitlines() if l.strip()]
+            if len(lines) > cfg["audit_max_lines"]:
+                keep_n = min(cfg["audit_keep_lines"], len(lines) - 1)
+                head, tail = lines[:-keep_n] if keep_n else lines, lines[-keep_n:] if keep_n else []
+                if head:
+                    if dry_run:
+                        acts.append(f"would rotate audit.jsonl: {len(head)} old line(s) -> log/archive/")
+                    else:
+                        log_archive.mkdir(parents=True, exist_ok=True)
+                        stem = f"audit-{now:%Y%m%d-%H%M%S}"
+                        dest = log_archive / f"{stem}.jsonl"
+                        collision = 1
+                        while dest.exists():
+                            dest = log_archive / f"{stem}-{collision}.jsonl"
+                            collision += 1
+                        _atomic_write_text(dest, "\n".join(head) + "\n")
+                        _atomic_write_text(AUDIT, "\n".join(tail) + "\n")
+                        acts.append(f"rotated audit.jsonl: {len(head)} old line(s) -> "
+                                    f"log/archive/, {len(tail)} kept")
 
     # -- 5. expire old archived handoff messages -> recoverable trash -------
     h_archive = CENTRAL / "handoff" / "archive"
@@ -3147,7 +3210,8 @@ def _groom(cfg: dict, dry_run: bool = False):
     if h_archive.is_dir():
         for f in sorted(h_archive.iterdir()):
             try:
-                if f.is_file() and (now.timestamp() - f.stat().st_mtime) > cfg["inbox_archive_days"] * 86400:
+                if (f.is_file() and f.suffix == ".md" and not f.name.startswith(".")
+                        and (now.timestamp() - f.stat().st_mtime) > cfg["inbox_archive_days"] * 86400):
                     expired.append(f)
             except OSError:
                 continue
@@ -3164,7 +3228,8 @@ def _groom(cfg: dict, dry_run: bool = False):
     # -- 6. report-only findings (never auto-fixed) --------------------------
     if INBOX.is_dir():
         try:
-            stale_unread = [f for f in INBOX.iterdir() if f.is_file()
+            stale_unread = [f for f in INBOX.iterdir()
+                            if f.is_file() and f.suffix == ".md" and not f.name.startswith(".")
                             and (now.timestamp() - f.stat().st_mtime) > cfg["inbox_archive_days"] * 86400]
         except OSError:
             stale_unread = []

@@ -19,6 +19,7 @@ import tempfile
 from contextlib import redirect_stdout
 from datetime import datetime
 from pathlib import Path
+from unittest import mock
 
 TMP = Path(tempfile.mkdtemp(prefix="ag-session-"))
 os.environ["AGENT_GUILD_DIR"] = str(TMP)  # must precede the ag import
@@ -91,6 +92,23 @@ def main():
           (notes.parent / f".{notes.name}.ag-lock").is_file(), True)
 
     build_guild()
+
+    # Context inspection can be explicitly free of maintenance and network
+    # hooks. Verify both bypass and no changes anywhere in the guild.
+    def snapshot():
+        return {str(p.relative_to(ag.CENTRAL)): p.read_bytes()
+                for p in ag.CENTRAL.rglob("*") if p.is_file()}
+
+    before = snapshot()
+    with mock.patch.object(ag, "maybe_auto_groom") as groom, \
+            mock.patch.object(ag, "maybe_auto_upgrade") as upgrade:
+        code, out = run(ag.cmd_bootstrap, ["alice", "--no-maintenance"])
+    check("bootstrap without maintenance exit", code, 0)
+    check("bootstrap without maintenance still reads context",
+          "5/5 context files loaded" in out, True)
+    check("bootstrap without maintenance skips grooming", groom.called, False)
+    check("bootstrap without maintenance skips upgrade checks", upgrade.called, False)
+    check("bootstrap without maintenance leaves guild unchanged", snapshot() == before, True)
 
     # -- bootstrap: dumps context + points at the session commands ----------
     code, out = run(ag.cmd_bootstrap, ["alice"])
@@ -176,6 +194,36 @@ def main():
     check("finish empties inbox", msg.exists(), False)
     check("finish archive reported",
           "archived 1 inbox message(s) -> handoff/archive/" in out, True)
+
+    # Real sends create persistent lock sidecars. They are not messages and
+    # must not move with an archive, or a concurrent sender can lose its lock.
+    code, _ = run(ag.cmd_send, ["alice", "repeat"], stdin="first message")
+    check("send exit", code, 0)
+    sent = ag._inbox_messages("alice")
+    check("inbox excludes send lock sidecars", len(sent), 1)
+    sent_path = sent[0]
+    sidecar = sent_path.with_name(f".{sent_path.name}.ag-lock")
+    code, out = run(ag.cmd_bootstrap, ["alice"])
+    inbox_output = out.split("== INBOX for alice", 1)[1].split("Other rules", 1)[0]
+    check("bootstrap hides inbox lock sidecars", ".ag-lock" in inbox_output, False)
+    code, out = run(ag.cmd_finish, ["alice", "--archive-inbox"], stdin="first batch")
+    check("finish counts actual messages only",
+          "archived 1 inbox message(s)" in out, True)
+    check("finish leaves inbox lock in place", sidecar.is_file(), True)
+    archive = ag.CENTRAL / "handoff/archive"
+    first_archive = archive / sent_path.name
+    check("first archived body", first_archive.read_text(encoding="utf-8"),
+          "first message\n")
+    code, _ = run(ag.cmd_send, ["alice", "repeat"], stdin="second message")
+    code, _ = run(ag.cmd_finish, ["alice", "--archive-inbox"], stdin="second batch")
+    check("repeat topic preserves first archive",
+          first_archive.read_text(encoding="utf-8"), "first message\n")
+    check("repeat topic gets a separate archive",
+          (archive / f"{sent_path.stem}-1.md").read_text(encoding="utf-8"),
+          "second message\n")
+    code, out = run(ag.cmd_finish, ["alice"], stdin="all processed")
+    check("only lock sidecars do not count as pending inbox",
+          "inbox message(s) still pending" in out, False)
 
     # cmd_log must still land in the same daily file after the refactor
     code, _ = run(ag.cmd_log, ["alice", "did things"], stdin="details here")

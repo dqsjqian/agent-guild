@@ -1,208 +1,162 @@
 # Agent Guild
 
-> A protocol that lets any sufficiently intelligent AI agent join your shared memory by simply reading one file.
+> Give your local AI assistants one shared set of preferences, project conventions, and work handoffs.
 
 **English** | [中文](README.md)
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Status](https://img.shields.io/badge/status-MVP-blue)]()
-[![Protocol](https://img.shields.io/badge/protocol-v3.3-green)]()
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/dqsjqian/agent-guild/blob/main/LICENSE)
+[![Protocol](https://img.shields.io/badge/protocol-v3.3-green)](references/SPEC.md)
 
----
+Agent Guild is for **one person using multiple trusted AI assistants with local filesystem access**.
+It stores shared context in Markdown and JSON under `~/.agent-guild/`, so you can inspect, edit,
+and back it up while switching assistants. A runtime skill defines the reading and writing
+contract; a Python CLI handles concurrent writes, search, and archiving.
 
-**You probably switch between multiple AI agents every day** — Claude Code, Cursor, CodeBuddy, WorkBuddy, OpenClaw, Aider, GitHub Copilot Chat… and every one of them is an isolated island. Each one has its own memory of you, none of them know what the other learned. You teach the same preferences over and over.
+## Try the outcome first: A remembers, B finds it
 
-**Agent Guild fixes that.** It's a tiny **protocol** — not a framework, not a service, not even a library — that lets multiple AI agents on your machine share a single source of truth via plain Markdown files and Unix symlinks.
+After installing and connecting two assistants, test a harmless demonstration convention:
 
----
+1. Tell assistant A:
+   > Remember this lasting demo convention: deliverables for the demo project must include validation results.
+   > Save it in the guild's `memory/shared/demo.md`, add it to `memory/shared/INDEX.md`, and report the saved path.
+2. Switch to assistant B:
+   > Search the guild for the “demo project” delivery convention. Repeat it and cite the source file.
+3. Check that B finds the same content and file. Remove the demo convention and its index entry when finished.
 
-## The 30-second pitch
+That is the useful acceptance test; placing a skill on disk is only the first installation step.
+Keep lasting preferences and project conventions in identity, rules, or shared memory.
+`log/daily/` records session history and is not a substitute for lasting memory.
+Assistants still need to read the relevant context; Agent Guild does not inject all history into every answer.
 
-```
-~/.agent-guild/                ← One central directory on your machine
-│
-│  ─── Protocol layer (mandatory) ───
-├── ONBOARDING.md                ← One-time joining flow for new agents
-├── CONVENTIONS.md               ← Optional, non-normative conventions
-├── identity/                    ← Who you are (profile, routine)
-├── rules/                       ← Hard rules every agent must obey
-├── toolchain/                   ← Tools, paths, configs
-├── projects/                    ← What you're working on
-├── log/daily/                   ← Per-agent daily logs (no write conflicts)
-├── handoff/                     ← Cross-agent inbox + shared state
-├── hosts/<host-id>/             ← Per-device state (local paths, install state)
-├── skills/agent-guild/    ← Runtime skill installed from repo root (SKILL.md + manifest + scripts)
-├── registry.json                ← Which agents have joined
-│
-│  ─── Convention layer (optional, recommended) ───
-├── skills_data/<skill>/         ← Per-skill persistent data (one backup root for all)
-├── mcp/<server>/                ← Shared MCP server configs
-├── plugins/<name>/              ← Shared plugins
-└── tools/<name>/                ← Shared CLI scripts/utilities (+ tool.json per platform)
-```
+## Where it fits
 
-Every joined agent points its whole skills dir at the guild with ONE directory link:
+| Your need | What Agent Guild provides |
+|---|---|
+| Switch between two or more local assistants without repeating conventions | Shared identity, rules, project state, and searchable memory files |
+| See and correct what assistants remember | Ordinary Markdown and JSON, with no proprietary database |
+| Hand off unfinished work | Shared focus, inbox messages, and daily logs for the receiving assistant to read |
+| Move personal working context to another device | Shared, platform, and host scopes; you choose how to transfer files |
+| Also consolidate skills, tools, and their data | An optional full shared-hub mode; trying memory does not require migrating those assets |
 
-```bash
-~/.<your-agent>/skills → ~/.agent-guild/skills/
-```
+It does not provide multi-user access isolation, automatic device synchronization, or background task execution.
+An assistant without access to the local files cannot use the directory directly. An assistant that can read
+files but cannot load custom skills can read the protocol manually; it needs a session reminder rather than
+automatic skill triggering.
 
-That's it. **No daemon. No server. No npm install. No third-party runtime. Pure filesystem.**
+The tradeoff is **less infrastructure and inspectable files, with assistants following a shared contract
+and the user managing filesystem access**. The CLI requires Python 3.9+ and uses only its standard library.
+There is no server or resident process.
 
----
+## Install and connect
 
-## Several devices, one guild
+### 1. Create the central directory
 
-The directory is safe to carry between machines — Windows, macOS, Linux,
-Android, iOS. Agent Guild does not move your files and makes no network calls;
-you pick the carrier. What it guarantees is the part that actually breaks:
-after the directory lands somewhere else, **every device can tell what applies
-to it**.
-
-| Scope | Test | Where it lives |
-|---|---|---|
-| `shared` | True on any device | Normal guild paths (identity, rules, memory, skills) |
-| `platform` | True for one OS + arch | `tools/<name>/tool.json`, payload in `bin/<os>-<arch>/` |
-| `host` | True for this machine | `hosts/<host-id>/` |
-
-```bash
-ag platform            # which device am I on? os / arch / host-id / link support
-ag tool doxygen        # path for THIS platform, or exit 3 + how to install here
-ag port                # portability audit; --apply fixes the mechanical parts
-```
-
-Full rules: [`PORTABILITY.md`](PORTABILITY.md).
-
----
-
-## Why this exists (and why it's different)
-
-| Existing solution | What it does | The catch |
-|---|---|---|
-| ChatGPT Memory | Auto-remembers facts about you | Locked inside OpenAI |
-| Claude Projects | Project-scoped context | Anthropic only |
-| MemGPT / Letta | Long-term memory inside one agent | Doesn't span agents |
-| Mem0 | Cross-agent memory service | Needs server, REST API, vendor lock |
-| MCP | Tool/resource protocol | Not about memory |
-| **Agent Guild** | **Cross-vendor, local-first, plaintext, zero-deps** | **Requires the agent to be smart enough to read a file** |
-
-The differentiator: **we don't write adapters for each agent**. We write a single `SKILL.md` that any sufficiently intelligent LLM can read and self-onboard from. Agents that can't follow plain English instructions… don't get to join. That's the design.
-
----
-
-## How a user makes any AI agent join
-
-Tell the agent, in any language, any phrasing:
-
-> "Read `~/.agent-guild/ONBOARDING.md` and join the Agent Guild system."
-
-That's the entire user-side workflow. No CLI to install, no configs to edit. The agent reads the file, follows the joining flow inside, and reports back.
-
-If the agent can't figure it out, **the agent isn't smart enough for your workflow** — and you'll know that, too. It's a built-in capability test.
-
----
-
-## What the protocol actually requires of a joined agent
-
-The protocol cleanly separates **one-time joining** from **ongoing capabilities**:
-
-- **`ONBOARDING.md`** (one-time): discover your runtime's user-extensible skills directory, consolidate it into ONE directory link to the guild (`ag link-root`; fallbacks: per-skill symlink → copy → readonly), run a closed-loop trigger test to prove the runtime can actually invoke it, register in `registry.json`.
-- **`SKILL.md`** (recurring): read shared identity / rules / current focus; check inbox / send messages; append daily logs; refresh `last_seen`. This is the runtime capability the joined agent carries forward.
-
-See [`ONBOARDING.md`](ONBOARDING.md) for the joining flow.
-See [`SKILL.md`](../SKILL.md) for the runtime capability spec.
-See [`SPEC.md`](SPEC.md) for the full normative specification.
-See [`CONVENTIONS.md`](CONVENTIONS.md) for optional, non-normative conventions (e.g. recommended skill data location at `~/.agent-guild/skills_data/`).
-See [`manifest.json`](../manifest.json) for the machine-readable spec.
-
----
-
-## Single source of truth — automatic protocol updates
-
-Each joined agent's `~/.<agent>/skills/` is **one directory symlink** to the central `~/.agent-guild/skills/`. When this project ships a protocol update, you update the central dir; **every agent on the user's machine sees the new version on its next session start**. No push notifications, no version checks, no hash comparison. Better still: a new skill any agent installs into the guild appears in every consolidated runtime instantly — no per-skill relinking, ever. (Fallback tier: per-skill symlinks.)
-
-User-owned files (`identity/`, `rules/`, `toolchain/`, etc.) are **never overwritten by upstream** — they live next to but outside the symlinked `skills/`.
-
----
-
-## Install (for users)
-
-### macOS / Linux / WSL / Git Bash
+macOS / Linux / WSL / Git Bash (Bash and curl required):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/dqsjqian/agent-guild/main/scripts/install.sh | bash
 ```
 
-### Windows (PowerShell)
+Windows (PowerShell 5.1+):
 
 ```powershell
 iwr -useb https://raw.githubusercontent.com/dqsjqian/agent-guild/main/scripts/install.ps1 | iex
 ```
 
-The installer does exactly **one** thing: bootstrap the central directory at `~/.agent-guild/` (or `%USERPROFILE%\.agent-guild\`) with seed files, then print a bilingual one-liner you can paste into any AI agent. **It does not touch any agent's home directory.** Agents install themselves — that's the protocol.
+The installer downloads the protocol and CLI, seeds templates, and prints the joining instruction.
+It does not modify an assistant's own directories. To inspect the source first, download and read
+the installer before running it.
 
-### Manual install
+### 2. Connect each assistant
+
+For a first trial, ask for shared memory only:
+
+> Read `~/.agent-guild/ONBOARDING.md` and connect shared memory only. Keep my existing skills and tools directories in place.
+
+If you want to consolidate more assets, explicitly choose the full shared hub:
+
+> Read `~/.agent-guild/ONBOARDING.md` and join in full shared-hub mode. Report the directories moved and the installation tier used.
+
+Full mode moves eligible assets into the guild and attempts a directory link for the assistant's skills.
+Fallbacks are per-skill links, copies, or manual reading. See the [joining flow](references/ONBOARDING.md).
+Then run the two-assistant test above to confirm that shared memory is actually retrievable.
+
+### Install from source
+
+Keep the **source checkout** separate from your **private guild data**. Run these commands in a source
+workspace of your choice:
 
 ```bash
-git clone https://github.com/dqsjqian/agent-guild ~/.agent-guild
+git clone https://github.com/dqsjqian/agent-guild agent-guild-source
+python3 agent-guild-source/scripts/ag.py init demo-agent
 ```
 
-Then tell your agent:
+Replace `demo-agent` with your assistant's name. On Windows, use `python` if that is your Python command.
+`init` creates the runtime directory at `~/.agent-guild/` and installs the skill; then give your assistant
+the joining instruction above. Do not clone the source repository directly into the private data directory.
 
-> "Read `~/.agent-guild/ONBOARDING.md` and join Agent Guild."
+## What you control
 
-The agent will figure out how to integrate with itself (one directory link, per-skill links, copy, or read-only fallback — see ONBOARDING.md).
+- **Memory content:** identity, rules, and project files are user-owned. Assistants should record relevant summaries; keep passwords and tokens out of shared memory.
+- **Network and updates:** installation downloads files. By default, `bootstrap` checks three public version sources at most once per device every 24 hours, without uploading memory content. In `UPGRADE.md`, `mode = check` reports updates, `mode = apply` downloads and installs them, and `mode = off` disables automatic checks. Manual `upgrade` remains available.
+- **Context-only reads:** `bootstrap <agent> --no-maintenance` skips automatic grooming and upgrade checks for that invocation without changing saved policies.
+- **Automatic archiving:** by default, `bootstrap` attempts grooming once per device every 24 hours. It archives expired logs, focus entries, and resolved learning entries, and rotates the audit log; unread messages are only reported. Preview with `groom --dry-run` and adjust retention in `RETENTION.md`. Archiving preserves history and does not reduce the total size of the directory's history.
+- **Sharing boundaries:** `memory/<agent>/` and `private/` are organizational conventions, not access controls or encryption. Programs with access to those files may still read them. Connect assistants you trust.
+- **Models and backups:** Agent Guild stores its data files locally. Whether an assistant sends their contents to a model service depends on that assistant's runtime; your chosen backup or sync tool also has its own data handling.
 
-(Windows users: replace `~` with `$HOME` in PowerShell, and use `New-Item -ItemType SymbolicLink` instead of `ln -s`.)
+These boundaries describe Agent Guild itself. Other skills and tools in shared directories have their own
+permissions and behavior. See the [security and capability disclosure](references/SECURITY.md).
 
-Then talk to your agent.
+## Daily use and updates
 
----
+Ask a connected assistant to “remember this project convention,” “find our previous decision,”
+“update the current focus,” or “groom the guild.” See the [capabilities reference](references/CAPABILITIES.md)
+for commands. CLI writes and checks happen when invoked, not in the background.
 
-## Platform support
+Check for and apply an update to Agent Guild:
 
-| OS / Shell | Status |
-|---|---|
-| macOS | ✅ first-class |
-| Linux | ✅ first-class (any POSIX shell) |
-| Windows + PowerShell 5.1+ | ✅ first-class (Dev Mode or Admin required for symlinks; directory junctions used otherwise) |
-| Windows + WSL / Git Bash | ✅ works (set `MSYS=winsymlinks:nativestrict` for Git Bash) |
-| Android (Termux) / iOS shells | ✅ recognised as their own platform tags; assets declared for other platforms report "not available here" plus an install hint |
-| Windows + cmd.exe | ❌ not supported (use PowerShell) |
+```bash
+python3 "$HOME/.agent-guild/skills/agent-guild/scripts/ag.py" upgrade
+python3 "$HOME/.agent-guild/skills/agent-guild/scripts/ag.py" upgrade --apply
+```
 
-`ag platform` prints what the current device resolved to, including whether it
-can create symlinks at all — a copy-only device still joins, it just uses the
-copy tier.
+On Windows, use `python` and the corresponding `$env:USERPROFILE` path. You can also rerun the installer.
+Updates replace Agent Guild's protocol files while preserving identity, rules, and project content.
+Linked installations see central updates; copy installations require the assistant's copy to be refreshed.
+See the [update procedure](references/ONBOARDING.md#step-7--update-protocol-how-to-stay-current-as-the-central-skill-evolves).
 
----
+## Files and multiple devices
 
-## Project status & philosophy
+```text
+~/.agent-guild/
+├── identity/ rules/ projects/     Identity, conventions, project state
+├── memory/shared/                Lasting shared facts and INDEX.md
+├── memory/<agent>/               Memory organized by assistant
+├── handoff/                      Focus, inbox, archives
+├── log/ learnings/               Session logs, corrections, lessons
+├── hosts/<host-id>/              Local paths, platform, installation state
+├── skills/agent-guild/           Agent Guild runtime skill
+├── RETENTION.md UPGRADE.md       Retention and automatic-check policies
+└── registry.json                Registration records
+```
 
-**Phase 1 (done): Protocol + reference content.** Directory skeleton, `SKILL.md`, `manifest.json`, cross-platform installers. The README is the product.
+Full shared-hub mode also uses `skills/`, `skills_data/`, `mcp/`, `plugins/`, and `tools/`.
+Shared facts stay in their usual directories. Tools for a specific OS or architecture use platform
+declarations; machine-specific paths belong under `hosts/<host-id>/`. Local file locks do not resolve
+conflicts introduced by synchronization between devices.
 
-**Phase 2 (done): Single-file CLI** (`ag`) — `init / adopt / link-root / bootstrap / doctor / platform / tool / tools / port / upgrade / learn / review / resolve / groom / status / register / log / focus / send / audit / prune`. Pure Python stdlib, zero dependencies, Windows / macOS / Linux.
+To move, copy the required directories using your chosen method, run `init` and `port` on the new device,
+and address missing platform tools. Review personal data and credentials included in a backup;
+keep private guild data out of public repositories. See [portability and backups](references/PORTABILITY.md).
 
-**Phase 3 (in progress): Adapters directory.** Community-contributed integration guides for specific agents.
+## Project and documentation
 
-We are deliberately **not** building:
-- a daemon
-- a Python/Node package on pip/npm
-- a CRDT sync engine
-- a cloud service
-- a chat UI
+Agent Guild is a local filesystem protocol and its reference implementation. It supports platform detection
+and several link fallbacks. Whether a skill loads depends on the assistant runtime's filesystem permissions
+and extension support; joining includes verification.
 
-This project is a **convention**, not software. Convention beats configuration. Filesystem beats database. Symlinks beat sync logic.
+- [Runtime skill](SKILL.md) · [Full specification](references/SPEC.md) · [Conventions](references/CONVENTIONS.md)
+- [Joining flow](references/ONBOARDING.md) · [Capabilities](references/CAPABILITIES.md) · [Machine-readable manifest](manifest.json)
+- [Contribute an integration guide](https://github.com/dqsjqian/agent-guild/blob/main/references/adapters/README.md)
 
----
-
-## License
-
-MIT. See [LICENSE](../LICENSE).
-
-## Author
-
-[@dqsjqian](https://github.com/dqsjqian) · also creator of [soul-archive](https://github.com/dqsjqian/soul-archive) and [ai-eight-creed](https://github.com/dqsjqian/ai-eight-creed).
-
----
-
-> *Make your AI agents finally stop forgetting each other.*
+License: [MIT](https://github.com/dqsjqian/agent-guild/blob/main/LICENSE). Author: [@dqsjqian](https://github.com/dqsjqian).
