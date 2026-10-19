@@ -39,13 +39,23 @@ state MUST fail closed. Whole-package closure requires completion evidence; wait
 and blocked tasks remain active. Scripts are attachments and never auto-executed.
 
 Historical data has one configurable 1 GiB default budget (800 MiB target), including
-archives, old checkpoints, logs, session bookkeeping and managed recovery/backups.
-Current task content, live rules and referenced materials are protected from retirement,
-not grounds to bypass limits on their historical copies. Maintenance checks and plans
-MUST NOT delete files. Confirmed actions require exact candidates, fresh validation,
-backup verification and recoverability. A move to recovery MUST NOT be called disk
-space reclamation. If safe cleanup cannot satisfy the budget, new history is blocked.
-The CLI has no scheduled daemon or guaranteed exit hook.
+archives, old checkpoints, logs, session bookkeeping, managed recovery and every
+maintenance artifact; no recovery or report directory is exempt. Retention operations
+are plan-driven and explicit: provenance-bearing summaries, verified lossless ZIP
+compaction with batched original replacement, whole-package retirement to managed
+recovery with restore, oldest-first remeasured cycles, and a permanent purge that
+requires an exact sealed file plan plus a second token explicitly covering the
+irreversible loss of the last verified backup. Batches are at most ten files with
+fresh identity/hash/policy/reference rechecks; interrupted transactions resume via
+journals without overwriting originals. Terminal retention records themselves are
+bounded cleanup candidates — a fixed, disclosed residue at most; nothing may be
+permanently retained as an unbounded archive. A fixed, disclosed maintenance reserve
+may hold bounded transactional overhead when the history budget is full; ordinary
+task/log writes MUST NOT consume it. Moving data into recovery MUST NOT be called
+disk space reclamation, and unlink MUST NOT be reported as guaranteed physical
+erasure (snapshots may retain blocks). If safe cleanup cannot satisfy the budget,
+new history is blocked. The CLI has no scheduled daemon or guaranteed exit hook;
+age and count thresholds are candidates, never deletion authority.
 
 Old message files are inventoried by `ag migrate --dry-run`. No automatic legacy
 migration, guessed tasks, or deletion is permitted. New messages live separately in

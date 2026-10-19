@@ -202,7 +202,7 @@ This file is **NOT** the runtime skill. The runtime skill (`~/.agent-guild/skill
 
 **Lesson 3 — install ≠ done**: file on disk is not success. Successful trigger from inside the runtime is success. After installing, you MUST verify the runtime can actually invoke the skill, and walk down the fallback ladder (dir-symlink → per-skill symlink → copy → readonly) if it cannot.
 
-**Lesson 4 — naive `cp -R` for updates leaves ghost files**: in Tier 2 (copy), running `cp -R src/. dst/` to "update" your snapshot **only adds and overwrites**; it does not delete files that were removed upstream. Over a few protocol releases, your local snapshot accumulates obsolete files contradicting the live protocol. **Always use `rsync --delete` or `Robocopy /MIR`** — see Step 7.
+**Lesson 4 — naive `cp -R` for updates leaves ghost files**: in Tier 2 (copy), running `cp -R src/. dst/` only adds and overwrites; removed upstream files remain. Use the checked same-parent staging/rollback procedure in Step 7. Never remove a live install first or mirror into an unverified destination.
 
 ---
 
@@ -218,11 +218,19 @@ You must see at least: `identity/  rules/  toolchain/  projects/  log/  handoff/
 
 If the directory is missing and the current skill package has `scripts/ag.py`,
 run `python3 <SKILL_DIR>/scripts/ag.py init <me>` (`python` on Windows).
-If the package is unavailable, use the installer within the user's requested
-setup scope:
+If the package is unavailable, use the installer's **download → inspect → execute**
+procedure in [README](../README.md#安装与接入) / [English README](../README_EN.md#install-and-connect),
+within the user's requested setup scope. Download `install.sh` or `install.ps1` and
+`ag.py` from the same reviewed 40-character commit into an empty directory. Inspect
+both local files before running `bash ./install.sh` or `.\install.ps1`. Never pipe
+remote content to a shell and never bypass PowerShell execution policy.
 
-- macOS/Linux: `curl -fsSL https://raw.githubusercontent.com/dqsjqian/agent-guild/main/scripts/install.sh | bash`
-- Windows: `iwr -useb https://raw.githubusercontent.com/dqsjqian/agent-guild/main/scripts/install.ps1 | iex`
+The local inspected CLI verifies a fixed release ZIP using its HTTPS GitHub API asset
+SHA-256 digest, or an exact-filename sidecar from the same release. No verification
+metadata means no installation. This is integrity checking through one release channel,
+not a publisher signature or independent trust root. The source security changes here
+are not a retroactive fix for the already-published `4.0.0` package; use a reviewed local
+checkout until a release contains the required modules and verification metadata.
 
 Report a missing runtime prerequisite only if neither route can run; do not
 send the user through a separate installation step when the package can
@@ -662,39 +670,29 @@ A simple "skip if same hash" check works fine — you don't need a daemon.
 
 #### How to resync (correct mirror semantics)
 
-The operation is **mirror**, not copy. Pick one:
+Use whole-package replacement, not an in-place merge. Before changing files:
 
-**POSIX — `rsync` with `--delete` (preferred — atomic enough, fast)**
+1. Confirm `$SKILLS_ROOT` is this runtime's discovered **user-extensible** directory.
+   Resolve both paths; the destination must not be the central package, an ancestor of it,
+   or reached through a directory symlink/junction. A linked install needs no copy update.
+2. Verify the existing destination contains only the Agent Guild protocol package.
+   Keep personal settings and task data outside that directory; unexpected content blocks replacement.
+3. Copy the full source into a fresh staging directory under the **same destination parent**.
+   Verify the complete manifest, `SKILL.md`, references and all runtime modules
+   (`ag.py`, `ag_tasks.py`, `ag_history.py`, `ag_retention.py`) before changing the live path.
+4. Rename the previous protocol directory to one clearly identified code-backup location,
+   then rename the verified stage to the live name. If that rename or subsequent verification
+   fails, restore the previous directory before reporting failure. Do not delete the live tree first.
+5. Retain at most one previous **protocol-code** backup, not accumulating timestamped backups.
+   Never clean an unfamiliar backup automatically. User data belongs to the user's separate
+   backup policy, not this code-only rollback slot.
 
-```bash
-rsync -a --delete ~/.agent-guild/skills/agent-guild/ "$SKILLS_ROOT/agent-guild/"
-# Note the trailing slash on the source — copies CONTENTS, not the dir itself.
-# --delete removes any files in dst that no longer exist in src (handles deletions/renames).
-```
-
-**POSIX — pure shell fallback (if `rsync` unavailable)**
-
-```bash
-# Stage to a temp dir first so a network/disk failure mid-copy doesn't corrupt the live install.
-TMP="$(mktemp -d)"
-cp -R ~/.agent-guild/skills/agent-guild/. "$TMP/"
-# Atomic-ish swap: rm old, mv new. (True atomicity needs same-FS.)
-rm -rf "$SKILLS_ROOT/agent-guild"
-mv "$TMP" "$SKILLS_ROOT/agent-guild"
-```
-
-**Windows PowerShell — `Robocopy /MIR`**
-
-```powershell
-robocopy "$env:USERPROFILE\.agent-guild\skills\agent-guild" `
-         "$SKILLS_ROOT\agent-guild" /MIR /NJH /NJS /NDL /NFL
-# /MIR = mirror: copy adds/changes AND deletes orphans in dst.
-```
-
-**Why not plain `cp -R`?**
-File added upstream → ✓ copied. File modified upstream → ✓ overwritten. File **deleted** upstream → ✗ still sitting in your snapshot, contradicting truth. File **renamed** upstream → ✗ both old and new names coexist. After a few protocol releases, your local snapshot diverges from the protocol in invisible ways. The mirror operations above all handle adds + modifies + deletes + renames correctly.
-
-**Don't manually patch your snapshot.** Always replace it wholesale via mirror. The central dir is the only source of truth.
+The CLI's release installation already uses this checked staging and rollback strategy for
+its central package. A copy-tier runtime update must implement the same path checks or use
+its runtime's package-management interface; do not improvise recursive-delete commands.
+A whole-package replacement removes obsolete upstream names without leaving a partial live tree.
+After replacement, run Step 7.4. Do not claim the two renames are one atomic transaction:
+a power failure between them can require restoring the retained code backup.
 
 ### Tier 3 — Read-only (zero work)
 
@@ -726,7 +724,7 @@ The runtime skill (`skills/agent-guild/SKILL.md`) will detect a major mismatch o
 If an update operation fails partway (network drop, disk full, permission error):
 
 - **Tier 1**: nothing changed (you didn't touch your symlink). Inspect `~/.agent-guild/` manually.
-- **Tier 2**: if you used the temp-dir + atomic swap pattern above, your live install is untouched. Retry the update. If you used `rsync --delete` and it failed mid-flight, your snapshot may be in a partial state — **re-run rsync** (it's idempotent) until it completes cleanly, then run the post-update self-test.
+- **Tier 2**: restore the retained previous protocol directory if the live rename failed. After a process/power interruption, inspect both live and backup paths before retrying; preserve unrecognized files. The central CLI recovers its recognized interrupted code backup on the next verified installation. Run the post-update self-test after a clean replacement.
 - **Tier 3**: nothing to recover; you read live each session.
 
 Rule of thumb: **never** leave the user with a half-updated install + a "looks-like-success" message. If you can't complete cleanly, roll back and report.

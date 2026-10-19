@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Offline packaging regressions, run in a disposable repository copy."""
+import hashlib
+import os
 import posixpath
+import sys
 import re
 import shutil
 import subprocess
@@ -25,8 +28,11 @@ class PackageTests(unittest.TestCase):
             ".git", "__pycache__", ".DS_Store"))
 
     def package(self, output):
+        env = dict(os.environ, HOME=str(self.base),
+                   PATH=str(Path(sys.executable).parent) + os.pathsep + os.environ["PATH"],
+                   PYTHONDONTWRITEBYTECODE="1")
         return subprocess.run(["bash", str(self.repo / "scripts/package.sh"),
-                               str(output)], cwd=self.base,
+                               str(output)], cwd=self.base, env=env,
                               capture_output=True, text=True)
 
     def test_relative_output_works_after_running_python_tests(self):
@@ -38,9 +44,14 @@ class PackageTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         archive = self.base / "build/my package.zip"
         self.assertTrue(archive.is_file())
+        checksum = archive.with_name(archive.name + ".sha256")
+        self.assertEqual(checksum.read_text(encoding="ascii"),
+                         hashlib.sha256(archive.read_bytes()).hexdigest() + "  " + archive.name + "\n")
         with zipfile.ZipFile(archive) as package:
             names = package.namelist()
-            for module in ("ag.py", "ag_tasks.py", "ag_history.py"):
+            self.assertFalse(any(name.endswith(".sha256") for name in names))
+            self.assertTrue(all(len(name.rstrip("/").split("/")) <= 3 for name in names))
+            for module in ("ag.py", "ag_tasks.py", "ag_history.py", "ag_retention.py"):
                 self.assertIn("agent-guild/scripts/" + module, names)
             self.assertIn("agent-guild/README.md", names)
             self.assertIn("agent-guild/README_EN.md", names)
@@ -56,6 +67,14 @@ class PackageTests(unittest.TestCase):
                     if target:
                         member = posixpath.normpath(posixpath.join(posixpath.dirname(name), target))
                         self.assertIn(member, names, f"{name}: {link}")
+
+    def test_chinese_output_name_has_matching_utf8_sidecar(self):
+        result = self.package(Path("build/协议包.zip"))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        archive = self.base / "build/协议包.zip"
+        sidecar = archive.with_name(archive.name + ".sha256")
+        self.assertEqual(sidecar.read_text(encoding="utf-8"),
+                         hashlib.sha256(archive.read_bytes()).hexdigest() + "  协议包.zip\n")
 
     def test_invalid_frontmatter_fails_and_preserves_existing_archive(self):
         skill_path = self.repo / "SKILL.md"
@@ -74,9 +93,12 @@ class PackageTests(unittest.TestCase):
             with self.subTest(label=label):
                 skill_path.write_text(contents, encoding="utf-8")
                 output.write_bytes(b"previous release")
+                sidecar = output.with_name(output.name + ".sha256")
+                sidecar.write_bytes(b"previous checksum")
                 result = self.package(output)
                 self.assertNotEqual(result.returncode, 0, result.stdout)
                 self.assertEqual(output.read_bytes(), b"previous release")
+                self.assertEqual(sidecar.read_bytes(), b"previous checksum")
 
 
 if __name__ == "__main__":

@@ -41,6 +41,7 @@ class InitVersionTests(unittest.TestCase):
         path.mkdir(parents=True, exist_ok=True)
         (path / "SKILL.md").write_text(marker, encoding="utf-8")
         (path / "manifest.json").write_text(json.dumps({
+            "name": "agent-guild",
             "protocol_version": proto, "skill_version": skill,
         }), encoding="utf-8")
         (path / "references").mkdir(exist_ok=True)

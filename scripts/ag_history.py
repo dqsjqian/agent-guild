@@ -364,9 +364,16 @@ class _Inventory:
                     closure.get("closed_at") if isinstance(closure, dict) else None))
                 if closed_at > self.now:
                     raise ValueError("任务 closed_at 在未来: " + rel)
+            packed = _safe_path(self.root, rel + "/pack.json").exists()
+            if packed:
+                if active:
+                    raise ValueError("活跃任务包含未恢复的压缩现场: " + rel)
+                import ag_retention
+                ag_retention.verify_compacted_metadata(self.api, self.root / rel, meta)
             self.tasks[task_id] = {"id": task_id, "path": rel, "active": active,
                                    "revision": revision, "closed_at": closed_at,
-                                   "held": held, "snapshot": snapshot, "metadata_sha256": digest}
+                                   "held": held, "snapshot": snapshot, "metadata_sha256": digest,
+                                   "packed": packed}
             self.references(meta, rel, active or held)
             if _safe_path(self.root, rel + "/.transition.json").exists():
                 self.reference_error("任务移动事务尚未完成: " + rel)
@@ -448,6 +455,8 @@ class _Inventory:
                 ("history", "history"),
             ):
                 self.walk(rel, category)
+            import ag_retention
+            ag_retention.inventory_additions(self)
         except (OSError, RuntimeError, ValueError) as exc:
             self.error(str(exc))
 
@@ -481,6 +490,8 @@ class _Inventory:
             return "被任务引用"
         task = self.tasks.get(row["task_id"])
         if task:
+            if task.get("packed"):
+                return "压缩任务只能通过整包保留维护操作，禁止零散隔离"
             if task["held"]:
                 return "任务被 pin/hold 保护"
             if self.task_referenced(task):
@@ -524,7 +535,9 @@ class _Inventory:
             "config": cfg,
             "exclusions": ["messages/inbox", "handoff/inbox", "identity", "rules", "memory",
                            "skills", "tools", "活跃任务根 meta/context 和必要 artifacts"],
-            "physical_release": "本工具不物理清空；备份、隔离区和 .trash 均继续计入预算",
+            "maintenance_reserve_bytes": 64 * 1024 * 1024,
+            "maintenance_over_budget_bytes": max(0, self.total_bytes - cfg["history_max_bytes"]),
+            "physical_release": "普通apply只隔离不释放；purge须具体计划和独立永久数据损失令牌，最多10文件/批，全部副本计费",
         }
 
 
@@ -565,7 +578,7 @@ def _eligibility(inventory):
             if len(compact) < 100:
                 compact.append({"task_id": task["id"], "revision": task["revision"],
                                 "closed_at": task["closed_at"].isoformat(),
-                                "suggestion": "可人工压缩详情并保留 meta/context/manifest；本版本不执行压缩"})
+                                "suggestion": "使用 history compact-plan 生成可审核的无损压缩计划"})
     for row in inventory.files:
         if row["duplicate"] or inventory.protected(row):
             continue
@@ -831,12 +844,16 @@ def maintenance(api):
                 return {"checked": False, "rate_limited": True, "previous": previous}
         inventory = _Inventory(api)
         plan = _plan(inventory, hashes=False)
+        import ag_retention
+        cycle_preview = ag_retention.preview_cycle(api)
         status = plan["status"]
         result = {"checked": True, "rate_limited": False, "status": status,
                   "eligible_files": plan["eligible_files"], "applied": False,
-                  "notice": "维护只检查和建议，不搬移、不压缩、不删除"}
+                  "cycle": cycle_preview,
+                  "notice": "限频维护只检查；显式 history cycle 计划经确认后执行压缩/退役/清空循环"}
         saved = {"checked_at": now.isoformat(), "total_bytes": status["total_bytes"],
-                 "complete": status["complete"], "eligible_files": plan["eligible_files"]}
+                 "complete": status["complete"], "eligible_files": plan["eligible_files"],
+                 "cycle": cycle_preview}
         text = _json(saved) + "\n"
         if status["complete"] and status["total_bytes"] + len(text.encode("utf-8")) <= cfg["history_max_bytes"]:
             _mkdir(root, "history")
@@ -851,6 +868,10 @@ def run(args, api):
     args = list(args)
     try:
         command = args.pop(0) if args else "status"
+        if command in ("compact-plan", "compact", "retire-plan", "retire", "restore",
+                       "purge-plan", "purge", "cycle"):
+            import ag_retention
+            return ag_retention.run([command, *args], api)
         if command in ("status", "plan"):
             if "--json" in args:
                 args.remove("--json")

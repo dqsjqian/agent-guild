@@ -59,20 +59,43 @@ CLI 需要 Python 3.9+，只使用标准库；没有服务端或常驻进程。
 
 ### 1. 建立中央目录
 
-macOS / Linux / WSL / Git Bash（需要 Bash 和 curl）：
+**先下载、检查，再执行；不要把网络响应直接传给 shell。** 安装器与引导 CLI
+必须来自同一已审查的固定提交，不从可变 `main` 逐文件拉取运行代码。
+本工作树的安全修复尚未发布；已公开的 `4.0.0` 不因此自动获得修复。当前优先使用下方
+“从源码安装”的已审查工作树；只有含全部运行模块且具有校验依据的 release 才能通过新安装器。
+
+macOS / Linux / WSL / Git Bash（Bash、curl、Python 3.9+），在空目录中运行：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/dqsjqian/agent-guild/main/scripts/install.sh | bash
+SOURCE_COMMIT="填入已审查的40位提交ID"
+[[ "$SOURCE_COMMIT" =~ ^[0-9a-fA-F]{40}$ ]] || exit 1
+BASE="https://raw.githubusercontent.com/dqsjqian/agent-guild/$SOURCE_COMMIT/scripts"
+curl --proto '=https' --tlsv1.2 -fsSL "$BASE/install.sh" -o install.sh
+curl --proto '=https' --tlsv1.2 -fsSL "$BASE/ag.py" -o ag.py
+less install.sh ag.py
+# 确认两份源码后，另行执行：
+AGENT_GUILD_VERSION=4.0.0 bash ./install.sh
 ```
 
-Windows（PowerShell 5.1+）：
+Windows（PowerShell 5.1+、Python 3.9+），同样先下载检查：
 
 ```powershell
-iwr -useb https://raw.githubusercontent.com/dqsjqian/agent-guild/main/scripts/install.ps1 | iex
+$SourceCommit = '填入已审查的40位提交ID'
+if ($SourceCommit -notmatch '^[0-9a-fA-F]{40}$') { throw '需要固定提交 ID' }
+$Base = "https://raw.githubusercontent.com/dqsjqian/agent-guild/$SourceCommit/scripts"
+Invoke-WebRequest -UseBasicParsing "$Base/install.ps1" -OutFile install.ps1
+Invoke-WebRequest -UseBasicParsing "$Base/ag.py" -OutFile ag.py
+Get-Content .\install.ps1
+Get-Content .\ag.py
+# 确认源码后另行执行，不绕过系统执行策略：
+$env:AGENT_GUILD_VERSION = '4.0.0'
+.\install.ps1
 ```
 
-安装器下载协议和 CLI、初始化模板，并打印接入口令。它不修改助手自己的目录。
-要先检查源码，也可以下载并阅读安装脚本后再运行。
+安装器复用已检查的本地 `ag.py`，从固定 tag 的 GitHub release ZIP 安装完整协议，
+随后初始化缺失模板并打印接入口令；不会修改助手自己的目录。
+`AGENT_GUILD_PYTHON` 可指定 Python 可执行文件，`AGENT_GUILD_DIR` 可指定运行目录。
+本地引导脚本的信任来自你的源码检查与固定提交选择，不来自它自己声称的 hash。
 
 ### 2. 让每个助手接入
 
@@ -94,6 +117,9 @@ iwr -useb https://raw.githubusercontent.com/dqsjqian/agent-guild/main/scripts/in
 
 ```bash
 git clone https://github.com/dqsjqian/agent-guild agent-guild-source
+# 先核对提交 ID 并检查源码；这条路径信任本地工作树，不进行 release 校验。
+git -C agent-guild-source rev-parse HEAD
+# 确认后另行执行：
 python3 agent-guild-source/scripts/ag.py init demo-agent
 ```
 
@@ -125,7 +151,15 @@ python3 "$HOME/.agent-guild/skills/agent-guild/scripts/ag.py" upgrade
 python3 "$HOME/.agent-guild/skills/agent-guild/scripts/ag.py" upgrade --apply
 ```
 
-Windows 使用 `python` 和 `$env:USERPROFILE` 对应路径。也可以重跑安装器。
+Windows 使用 `python` 和 `$env:USERPROFILE` 对应路径。也可以重跑已检查的安装器。
+新安装/更新路径绑定同一版本 tag 和资产名，优先校验 GitHub HTTPS release API 的
+`digest = sha256:<64位十六进制>`；缺失时只接受同一 release 的同名 `.zip.sha256`，
+且校验行必须指向目标 ZIP 的 basename。缺少校验依据、hash 不符或不安全 ZIP 均拒绝安装。
+这是基于同一发布渠道的**完整性校验，不是签名，也不能抵御发布账号或渠道同时被攻破**。
+解包拒绝路径逃逸、重复/大小写冲突、链接与压缩炸弹，展开总量上限 64 MiB。
+交换失败会还原旧代码，最多保留一份 `.agent-guild.previous-code` 协议代码备份，
+下一次经过校验的更新时轮换这份旧备份；它不是用户数据备份，不含身份、规则或任务材料。
+`bash scripts/package.sh` 会在 ZIP 同目录生成完整 SHA-256 sidecar，上传 release 时需一起提供。
 更新作用于 Agent Guild 自身的协议文件，不覆盖身份、规则和项目内容；链接安装随中央版本更新，
 拷贝安装还需同步助手内的副本，见 [更新流程](references/ONBOARDING.md#step-7--update-protocol-how-to-stay-current-as-the-central-skill-evolves)。
 

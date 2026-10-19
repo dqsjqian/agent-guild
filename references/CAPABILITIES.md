@@ -194,14 +194,67 @@ ag history apply --plan history/plan.json --confirm
 ag groom --dry-run
 ```
 
-The maintained plan path is fixed and replaceable, not an unlimited sequence
+### Full retention operations
+
+```bash
+ag history compact-plan --id TASK_ID --output history/retention-plan.json
+ag history compact --plan history/retention-plan.json --confirm TOKEN
+ag history retire-plan --id TASK_ID --output history/retention-plan.json
+ag history retire --plan history/retention-plan.json --confirm TOKEN
+ag history restore --ticket TICKET
+ag history purge-plan --ticket TICKET --output history/retention-plan.json
+# Separate approval explicitly covers the final backup and irreversible loss:
+ag history purge --plan history/retention-plan.json --confirm TOKEN --confirm-data-loss LOSS_TOKEN
+ag history cycle --output history/retention-plan.json
+ag history cycle --plan history/retention-plan.json --confirm TOKEN --confirm-data-loss LOSS_TOKEN
+```
+
+Plan commands print exact file inventories and tokens, and do not alter payloads.
+An optional managed plan always replaces the fixed `history/retention-plan.json`;
+`--plan -` consumes the exact reviewed JSON on stdin when the normal budget is full.
+A token proves plan identity, not human consent: obtain the user's explicit approval.
+For every permanent cleanup, show all paths, warn of irreversible loss, verify
+backups and confirm the last-copy disposal separately. Never infer consent from
+age thresholds, a generic cleanup request, or authorization to develop the feature.
+
+Compression builds and fully verifies a lossless `payload.zip`, retains directly
+readable `meta.json` and a provenance-bearing summary, then replaces originals
+in at-most-ten-file batches. Summaries are deterministic excerpts with source
+hashes and truncation markers, not invented facts or an LLM judgment. Task list
+still reads metadata only. Explicit reopening restores original snapshot and
+attachment hashes; any corruption stops recovery without overwriting originals.
+
+Retirement atomically moves the **whole task package** to `history/retired/TICKET/`.
+Only closed, unheld, unreferenced tasks qualify. Restore fails on destination
+conflicts rather than overwriting another task. Retirement alone frees no disk.
+Purge verifies a recovery backup before deleting only enumerated managed files;
+its distinct loss token explicitly includes the final backup. Every batch checks
+file identities, hashes, policy and references again. Failure preserves a journal
+and remaining recovery material; repeat the same approved plan to continue.
+
+Cycle selects oldest-first by age, archive count and pressure, compresses first,
+remeasures after each batch, and only proceeds to explicitly approved retirement
+and purge if needed. `in_progress` means another bounded batch; `complete` means
+the planned retention conditions were met; `blocked` / `needs_confirmation`
+stops without guessing new authority. No unlisted new files join an old plan.
+
+Normal writes remain within `history_max_bytes`. Maintenance alone has one
+fixed 64 MiB transactional reserve, shown in status and still counted. It is
+not a per-task allowance, not a second unbounded archive, and cannot be used
+by normal task/log writes. Incompressible/protected content or insufficient
+transactional workspace stops the operation instead of deleting unapproved data.
+
+### Legacy file quarantine
+
+The maintained legacy plan path is fixed and replaceable, not an unlimited sequence
 of reports. A plan carries file identities/hashes, policy and task metadata
 checks; changed inputs, protected references or links block application.
 Apply handles at most ten files, verifies backups before relocating originals
 to managed quarantine, and verifies the result. It does not physically empty
 quarantine. Backup/quarantine bytes remain counted: `physical_bytes_freed` is
-zero. Physical release is a separate human-controlled action, not a promise
-that this command shrinks disk usage. Insufficient backup headroom stops it.
+zero. Physical release uses the separate, dual-confirmed `purge` workflow;
+legacy quarantine tickets are supported. Insufficient verified backup headroom
+stops the operation rather than implying files were safely reclaimed.
 
 The loop checks on startup/finish (default 24h cooldown) and before protected
 writes: measure, identify eligible old data, plan, confirm, verify, measure

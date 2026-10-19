@@ -1118,17 +1118,6 @@ def _version_gt(a: str, b: str) -> bool:
     return len(pa) > len(pb)
 
 
-def _replace_tree(src: Path, dst: Path) -> None:
-    """Replace dst with a copy of src (temp dir + atomic-ish rename).
-    VCS / OS noise and caches are never copied."""
-    ignore = shutil.ignore_patterns(".git", ".DS_Store", "__pycache__", ".venv")
-    tmp = dst.with_name(dst.name + ".new")
-    shutil.rmtree(tmp, ignore_errors=True)
-    shutil.copytree(src, tmp, ignore=ignore)
-    shutil.rmtree(dst, ignore_errors=True)
-    tmp.rename(dst)
-
-
 def cmd_init(args: list) -> int:
     """Bootstrap the central dir. Idempotent: never clobbers existing data."""
     agent = default_agent(args)
@@ -1227,7 +1216,9 @@ def cmd_init(args: list) -> int:
             skill_status = "MISSING — copy the agent-guild skill package into skills/agent-guild/"
     elif upgrading:
         if skill_src.resolve() != own_skill.resolve() and (skill_src / "SKILL.md").is_file():
-            _replace_tree(skill_src, own_skill)
+            # Same restricted swap path as `upgrade --apply`: source init must
+            # not bypass the link/protocol/downgrade checks and the backup.
+            _upgrade_replace_tree(skill_src, own_skill)
             skill_status = f"upgraded {inst_skill or '?'} → {cur_skill}"
             applied_proto, applied_skill = cur_proto, cur_skill
             refresh_docs = True
@@ -1354,27 +1345,6 @@ def fetch_clawhub_version() -> str:
     return str(items[0]["version"])
 
 
-def _apply_skill_package(skill_src_dir: Path, proto: str, skill: str) -> None:
-    """Replace the central skill package + root docs from skill_src_dir, then
-    bump the VERSION anchor. User-data dirs are never touched."""
-    own_skill = CENTRAL / "skills" / "agent-guild"
-    _replace_tree(skill_src_dir, own_skill)
-    for doc in PROTOCOL_DOCS:
-        src = None
-        for sub in DOC_DIRS:
-            cand = skill_src_dir / sub / doc
-            if cand.is_file():
-                src = cand
-                break
-        if src is None:
-            continue
-        body = src.read_text(encoding="utf-8")
-        target = CENTRAL / doc
-        if not target.exists() or target.read_text(encoding="utf-8") != body:
-            target.write_text(body, encoding="utf-8")
-    write_runtime_version(proto, skill)
-
-
 def cmd_upgrade(args: list) -> int:
     """Check the three platforms for a newer version; --apply downloads and
     installs it (user data preserved)."""
@@ -1424,28 +1394,338 @@ def cmd_upgrade(args: list) -> int:
     return 0
 
 
+# 安装和更新共用此校验链；HTTPS 元数据提供完整性，不等同独立签名信任。
+_UPGRADE_MAX_BYTES = 64 * 1024 * 1024
+_UPGRADE_MAX_ENTRIES = 2048
+
+
+def _release_bytes(url: str, limit: int, timeout: int = 120) -> bytes:
+    """有界 HTTPS 下载；重定向也不得降级或离开 GitHub 的资产主机。"""
+    from urllib.parse import urlsplit
+
+    def check_url(value):
+        parsed = urlsplit(value)
+        if (parsed.scheme != "https" or parsed.username or parsed.password
+                or parsed.port not in (None, 443)
+                or parsed.hostname not in ("api.github.com", "github.com",
+                                           "release-assets.githubusercontent.com",
+                                           "objects.githubusercontent.com")):
+            raise ValueError("拒绝非授权 HTTPS release URL")
+
+    class SafeRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            check_url(newurl)
+            return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+    check_url(url)
+    req = urllib.request.Request(url, headers={"User-Agent": "agent-guild",
+                                               "Accept": "application/vnd.github+json"})
+    with urllib.request.build_opener(SafeRedirect).open(req, timeout=timeout) as response:
+        check_url(response.geturl())
+        data = response.read(limit + 1)
+    if len(data) > limit:
+        raise ValueError("release 下载超过大小上限")
+    return data
+
+
+def _release_digest(asset: dict):
+    value = asset.get("digest")
+    if value is None or value == "":
+        return None
+    if not isinstance(value, str) or not re.fullmatch(r"sha256:[0-9a-fA-F]{64}", value):
+        raise ValueError("release asset digest 必须是完整 SHA-256")
+    return value[7:].lower()
+
+
+def _verified_release_zip(version: str) -> bytes:
+    """绑定同一 tag、资产名称及 HTTPS API digest，缺少校验依据则拒绝安装。"""
+    import hashlib
+    if not isinstance(version, str) or not re.fullmatch(r"[0-9]{1,6}\.[0-9]{1,6}\.[0-9]{1,6}", version):
+        raise ValueError("release version 必须为 x.y.z")
+    api = "https://api.github.com/repos/dqsjqian/agent-guild/releases/tags/v" + version
+    release = json.loads(_release_bytes(api, 2 * 1024 * 1024, timeout=30))
+    if (not isinstance(release, dict) or release.get("tag_name") != "v" + version
+            or release.get("draft") or release.get("prerelease")):
+        raise ValueError("release tag 不匹配或不是正式发布")
+    assets = release.get("assets")
+    if not isinstance(assets, list):
+        raise ValueError("release 缺少资产列表")
+    name = f"agent-guild-v{version}.zip"
+    url = GITHUB_RELEASE_ZIP.format(ver=version)
+
+    def asset_named(asset_name, asset_url, limit):
+        matches = [a for a in assets if isinstance(a, dict) and a.get("name") == asset_name]
+        if len(matches) != 1:
+            raise ValueError(f"release 必须包含唯一资产 {asset_name}")
+        asset = matches[0]
+        size = asset.get("size")
+        if (asset.get("browser_download_url") != asset_url
+                or asset.get("state") != "uploaded"
+                or type(size) is not int or not 0 < size <= limit):
+            raise ValueError(f"release 资产 URL、状态或大小无效: {asset_name}")
+        return asset
+
+    asset = asset_named(name, url, _UPGRADE_MAX_BYTES)
+    expected = _release_digest(asset)
+    if expected is None:
+        sidecar = asset_named(name + ".sha256", url + ".sha256", 4096)
+        checksum = _release_bytes(url + ".sha256", 4096)
+        if len(checksum) != sidecar["size"]:
+            raise ValueError("SHA-256 sidecar 大小不匹配")
+        sidecar_digest = _release_digest(sidecar)
+        if sidecar_digest and hashlib.sha256(checksum).hexdigest() != sidecar_digest:
+            raise ValueError("SHA-256 sidecar digest 不匹配")
+        match = re.fullmatch(r"([0-9a-fA-F]{64}) [ *]" + re.escape(name) + r"\r?\n?",
+                             checksum.decode("ascii"))
+        if not match:
+            raise ValueError("SHA-256 sidecar 必须仅包含目标资产 basename 和完整 hash")
+        expected = match.group(1).lower()
+    data = _release_bytes(url, _UPGRADE_MAX_BYTES)
+    if len(data) != asset["size"] or hashlib.sha256(data).hexdigest() != expected:
+        raise ValueError("release ZIP SHA-256 或大小不匹配；未安装")
+    return data
+
+
+def _extract_verified_release(data: bytes, stage: Path, version: str) -> Tuple[Path, str]:
+    """先验证整个 ZIP 索引，再解包；拒绝路径别名、链接和压缩炸弹。"""
+    import unicodedata
+    paths, explicit, total = {}, set(), 0
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        entries = archive.infolist()
+        if not entries or len(entries) > _UPGRADE_MAX_ENTRIES:
+            raise ValueError("ZIP 条目数超限")
+        for entry in entries:
+            raw = entry.filename
+            parts = (raw[:-1] if raw.endswith("/") else raw).split("/")
+            if (raw != entry.orig_filename or "\\" in raw or not raw
+                    or parts[0] != "agent-guild" or len(parts) > 3
+                    or (len(parts) == 1 and not entry.is_dir())):
+                raise ValueError("ZIP 路径或包布局无效")
+            for part in parts:
+                device = part.split(".", 1)[0].upper()
+                if (part in ("", ".", "..") or part.endswith((".", " "))
+                        or any(ord(c) < 32 or ord(c) == 127 or c in ':<>"|?*' for c in part)
+                        or device in ("CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$")
+                        or re.fullmatch(r"(?:COM|LPT)[1-9¹²³]", device)):
+                    raise ValueError("ZIP 包含不安全路径")
+            key = unicodedata.normalize("NFC", "/".join(parts)).casefold()
+            if key in explicit:
+                raise ValueError("ZIP 包含重复或大小写冲突路径")
+            explicit.add(key)
+            for i in range(1, len(parts) + 1):
+                path = "/".join(parts[:i])
+                folded = unicodedata.normalize("NFC", path).casefold()
+                kind = "dir" if i < len(parts) or entry.is_dir() else "file"
+                if folded in paths and paths[folded] != (path, kind):
+                    raise ValueError("ZIP 包含路径别名或文件目录冲突")
+                paths[folded] = (path, kind)
+            mode = stat.S_IFMT(entry.external_attr >> 16)
+            if (mode not in (0, stat.S_IFDIR if entry.is_dir() else stat.S_IFREG)
+                    or entry.flag_bits & 1
+                    or entry.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED)
+                    or (entry.is_dir() and entry.file_size)):
+                raise ValueError("ZIP 包含链接、特殊文件或不支持的压缩条目")
+            total += entry.file_size
+            if (total > _UPGRADE_MAX_BYTES
+                    or entry.file_size > max(1, entry.compress_size) * 200):
+                raise ValueError("ZIP 解压大小或压缩比超限")
+        written = 0
+        for entry in entries:
+            target = stage.joinpath(*entry.filename.rstrip("/").split("/"))
+            if entry.is_dir():
+                target.mkdir(parents=True, exist_ok=True)
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            count = 0
+            with archive.open(entry) as source, target.open("xb") as dest:
+                while True:
+                    chunk = source.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    count += len(chunk)
+                    written += len(chunk)
+                    if written > _UPGRADE_MAX_BYTES or count > entry.file_size:
+                        raise ValueError("ZIP 实际解压大小超限")
+                    dest.write(chunk)
+            if count != entry.file_size:
+                raise ValueError("ZIP 实际文件大小不匹配")
+            target.chmod(0o755 if target.name in ("ag.py", "install.sh") else 0o644)
+    pkg = stage / "agent-guild"
+
+    def reject(message: str):
+        # 校验失败时不留下半解包的 payload，stage 由调用方处置。
+        shutil.rmtree(pkg, ignore_errors=True)
+        raise ValueError(message)
+
+    if not (pkg / "manifest.json").is_file() or not (pkg / "SKILL.md").is_file():
+        reject("release ZIP 缺少必要协议文件或运行模块")
+    manifest = json.loads((pkg / "manifest.json").read_text(encoding="utf-8"))
+    proto = manifest.get("protocol_version") if isinstance(manifest, dict) else None
+    if (not isinstance(manifest, dict) or manifest.get("name") != "agent-guild"
+            or manifest.get("skill_version") != version
+            or not isinstance(proto, str) or not re.fullmatch(r"[0-9]+\.[0-9]+", proto)):
+        reject("release manifest 名称、版本或协议不匹配")
+    # 必需运行模块由 payload 自身声明：CLI 本体 + manifest.scripts 声明的
+    # .py + ag.py/ag_history.py 静态 import 的 ag_* 兄弟模块。旧版合法三
+    # 模块 4.0.0 包（无 ag_retention.py）因此可安装；缺自身必需模块才拒绝。
+    required = {"scripts/ag.py"}
+    required.update("references/" + doc for doc in PROTOCOL_DOCS)
+    declared = manifest.get("scripts")
+    if isinstance(declared, dict):
+        for entry in declared.values():
+            if (isinstance(entry, str)
+                    and re.fullmatch(r"scripts/[A-Za-z0-9][A-Za-z0-9._-]*\.py", entry)):
+                required.add(entry)
+    for module in ("ag.py", "ag_history.py"):
+        path = pkg / "scripts" / module
+        if path.is_file():
+            text = path.read_text(encoding="utf-8")
+            required.update("scripts/" + name + ".py" for name in
+                            re.findall(r"(?m)^[ \t]*(?:import|from)[ \t]+(ag_[a-z0-9_]+)\b", text))
+    missing = sorted(name for name in required if not (pkg / name).is_file())
+    if missing:
+        reject("release ZIP 缺少必要协议文件或运行模块: " + ", ".join(missing))
+    return pkg, proto
+
+
+def _upgrade_check_code_tree(root: Path) -> None:
+    """仅接受有界的普通协议代码目录；不跟随 symlink/junction。"""
+    if is_link(root) or not root.is_dir():
+        raise ValueError(f"不是普通代码目录: {root}")
+    count = size = 0
+    for parent, dirs, files in os.walk(root, followlinks=False):
+        for name in dirs + files:
+            path = Path(parent) / name
+            count += 1
+            info = path.lstat()
+            if is_link(path) or not (stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode)):
+                raise ValueError(f"代码目录包含链接或特殊文件: {path}")
+            size += info.st_size if stat.S_ISREG(info.st_mode) else 0
+            if count > _UPGRADE_MAX_ENTRIES or size > _UPGRADE_MAX_BYTES:
+                raise ValueError("协议代码目录超过大小或条目上限")
+    manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+    if not isinstance(manifest, dict) or manifest.get("name") != "agent-guild":
+        raise ValueError("拒绝替换或清理非 Agent Guild 协议目录")
+
+
+def _upgrade_replace_tree(src: Path, dst: Path, after_swap=None) -> None:
+    """同父目录 stage → 单份代码备份 → rename；失败恢复旧包，非用户数据备份。"""
+    if is_link(dst.parent) or is_link(dst):
+        raise ValueError("拒绝通过链接替换协议代码")
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    backup = dst.with_name("." + dst.name + ".previous-code")
+    marker = "Agent Guild protocol code backup v1\n"
+    with _append_lock(dst):
+        if backup.exists() or is_link(backup):
+            if (is_link(backup) or not backup.is_dir()
+                    or {p.name for p in backup.iterdir()} != {"OWNER", "package"}
+                    or is_link(backup / "OWNER")
+                    or (backup / "OWNER").read_text(encoding="utf-8") != marker):
+                raise ValueError(f"拒绝清理无法识别的代码备份: {backup}")
+            _upgrade_check_code_tree(backup / "package")
+            if not dst.exists():
+                os.replace(backup / "package", dst)
+                shutil.rmtree(backup)
+        if dst.exists():
+            _upgrade_check_code_tree(dst)
+            old_proto, old_version = current_versions(dst)
+            new_proto, new_version = current_versions(src)
+            if _version_gt(old_version, new_version) or _version_gt(old_proto, new_proto):
+                raise ValueError("拒绝将已安装协议降级")
+        _upgrade_check_code_tree(src)
+        with tempfile.TemporaryDirectory(prefix=".ag-release-stage-", dir=dst.parent) as temp:
+            candidate = Path(temp) / "package"
+            shutil.copytree(src, candidate)
+            _upgrade_check_code_tree(candidate)
+            if backup.exists():
+                shutil.rmtree(backup)
+            had_old = dst.exists()
+            if had_old:
+                backup.mkdir()
+                (backup / "OWNER").write_text(marker, encoding="utf-8")
+                try:
+                    os.replace(dst, backup / "package")
+                except BaseException:
+                    shutil.rmtree(backup)
+                    raise
+            try:
+                os.replace(candidate, dst)
+                if after_swap:
+                    after_swap()
+            except BaseException:
+                # 新包移回临时位置后再恢复旧包，不先删除可恢复的旧安装。
+                if dst.exists():
+                    os.replace(dst, Path(temp) / "failed-package")
+                if had_old:
+                    os.replace(backup / "package", dst)
+                    shutil.rmtree(backup)
+                raise
+
+
+def _apply_verified_release(pkg: Path, proto: str, version: str) -> None:
+    """仅更新协议代码、入口文档与本机版本锚；文档失败也回滚。"""
+    own = CENTRAL / "skills" / "agent-guild"
+    if is_link(CENTRAL) or is_link(own.parent):
+        raise ValueError("拒绝通过链接写入中央协议目录")
+    anchor = host_dir() / "VERSION"
+    updates = {CENTRAL / doc: (pkg / "references" / doc).read_text(encoding="utf-8")
+               for doc in PROTOCOL_DOCS}
+    updates[anchor] = (
+        "# Agent Guild runtime version — managed by `ag init` / `ag upgrade`.\n"
+        "# Records the version last applied on THIS device. Do not edit.\n"
+        f"host_id={host_id()}\nprotocol_version={proto}\nskill_version={version}\n")
+    for path in updates:
+        if is_link(path) or any(is_link(p) for p in path.parents if p != CENTRAL.parent and CENTRAL in p.parents):
+            raise ValueError(f"协议状态路径不能是链接: {path}")
+        if path.exists() and not path.is_file():
+            raise ValueError(f"协议状态目标不是文件: {path}")
+
+    def refresh_state():
+        previous = {path: path.read_bytes() if path.exists() else None for path in updates}
+        changed = []
+        try:
+            for path, text in updates.items():
+                _atomic_write_text(path, text)
+                changed.append(path)
+        except BaseException:
+            for path in reversed(changed):
+                if previous[path] is None:
+                    path.unlink()
+                else:
+                    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".ag-restore-")
+                    try:
+                        with os.fdopen(fd, "wb") as stream:
+                            stream.write(previous[path])
+                        os.replace(tmp, path)
+                    finally:
+                        if os.path.exists(tmp):
+                            os.unlink(tmp)
+            raise
+
+    _upgrade_replace_tree(pkg, own, refresh_state)
+
+
 def _download_and_apply(latest: str) -> Tuple[bool, str]:
-    """Shared by `ag upgrade --apply` and the bootstrap auto-upgrade:
-    download the release zip and swap the skill package in. User data is
-    preserved (see _apply_skill_package). Returns (ok, message)."""
+    """安装器、手动升级和自动升级共用的 fail-closed release 安装路径。"""
     try:
-        data = _http_bytes(GITHUB_RELEASE_ZIP.format(ver=latest), timeout=120)
-    except Exception as e:
-        return False, f"download failed: {e}"
-    try:
-        with zipfile.ZipFile(io.BytesIO(data)) as z:
-            stage = Path(tempfile.mkdtemp(prefix="ag-upgrade-"))
-            z.extractall(stage)
-        pkg = stage / "agent-guild"
-        if not (pkg / "SKILL.md").is_file():
-            return False, "apply failed: release zip has unexpected layout"
-        m = json.loads((pkg / "manifest.json").read_text(encoding="utf-8"))
-        new_proto = m.get("protocol_version", PROTOCOL_VERSION)
-        new_skill = m.get("skill_version", latest)
-        _apply_skill_package(pkg, new_proto, new_skill)
-        return True, f"upgraded → {new_skill} (protocol {new_proto})"
-    except Exception as e:
-        return False, f"apply failed: {e}"
+        data = _verified_release_zip(latest)
+        with tempfile.TemporaryDirectory(prefix="ag-upgrade-") as temp:
+            pkg, proto = _extract_verified_release(data, Path(temp), latest)
+            _apply_verified_release(pkg, proto, latest)
+        return True, f"upgraded → {latest} (protocol {proto}; SHA-256 verified)"
+    except Exception as error:
+        return False, f"release 校验或安装失败: {error}"
+
+
+def _install_release(version: str) -> int:
+    """薄安装器入口；审查后的本地 CLI 先校验，最后才执行已核验的包。"""
+    ok, message = _download_and_apply(version)
+    if not ok:
+        print(message, file=sys.stderr)
+        return 1
+    script = CENTRAL / "skills" / "agent-guild" / "scripts" / "ag.py"
+    result = subprocess.run([sys.executable, str(script), "init"], check=False)
+    return result.returncode
 
 
 # ------------------------------------------------------------------ adopt ---
@@ -1878,7 +2158,10 @@ def cmd_finish(args: list) -> int:
                     while dest.exists() or dest.is_symlink():
                         dest = archive_dir / f"{f.stem}-{suffix}{f.suffix}"
                         suffix += 1
-                    shutil.move(str(f), str(dest))
+                    import ag_history
+                    with ag_history.budget_lock(sys.modules[__name__]):
+                        ag_history.ensure_capacity(sys.modules[__name__], f.stat().st_size)
+                        shutil.move(str(f), str(dest))
                 archived += 1
         print(f"archived {archived} inbox message(s) -> messages/archive/")
     elif mine:

@@ -1,139 +1,30 @@
-﻿# Agent Guild — Windows installer (PowerShell)
-#
-# Usage (one-shot):
-#   iwr -useb https://raw.githubusercontent.com/dqsjqian/agent-guild/main/scripts/install.ps1 | iex
-#
-# Or:
-#   .\install.ps1
-#
-# This script bootstraps %USERPROFILE%\.agent-guild\ and prints the
-# agent-onboarding message. It does NOT touch any AI agent's home directory —
-# agents join the system on their own by reading ONBOARDING.md (one-time
-# joining flow); afterwards they use skills\agent-guild\SKILL.md as their
-# runtime capability.
-#
-# Idempotent: re-running upgrades the protocol skeleton without touching your data.
-#
-# Requirements: PowerShell 5.1 or later.
-
-# UTF-8 output (otherwise Chinese gets garbled on Windows PowerShell 5.1)
-# NOTE: this file is saved as UTF-8 with BOM so PS 5.1 parses Chinese literals correctly.
-$OutputEncoding = [System.Text.Encoding]::UTF8
-[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-try { chcp 65001 > $null } catch {}
+﻿# Agent Guild Windows 安装器，要求 PowerShell 5.1+ 和 Python 3.9+。
+# 下载并检查同一固定提交的 install.ps1 和 ag.py 后执行：.\install.ps1
+# 不使用 Invoke-Expression，不下载或执行可变 main 分支代码。
+# 两个平台复用 ag.py 的 release SHA-256 门禁和受限解包逻辑。
 
 $ErrorActionPreference = 'Stop'
+$OutputEncoding = [System.Text.Encoding]::UTF8
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
-$Central = Join-Path $env:USERPROFILE '.agent-guild'
-$RepoRawUrl = if ($env:AGENT_GUILD_REPO) { $env:AGENT_GUILD_REPO } else { 'https://raw.githubusercontent.com/dqsjqian/agent-guild/main' }
-
-# ── Non-interactive bootstrap ───────────────────────────────────────────────
-$null = & {
-    # Directory skeleton
-    #   skills\<name>\        agent-loadable capabilities
-    #   skills_data\<name>\   per-skill persistent data
-    #   mcp\<server>\         shared MCP server configs / local implementations
-    #   plugins\<name>\       shared plugins
-    #   tools\<name>\         shared scripts / utilities
-    #   memory\<agent>\       agent-private memory adopted from each runtime
-    #   memory\shared\        facts every joined agent should know
-    $dirs = @(
-        'skills\agent-guild\scripts','skills\agent-guild\references','skills_data','mcp','plugins','tools',
-        'memory\shared',
-        'identity','rules','toolchain','projects','hosts',
-        'log\daily','log\decisions','log\archive',
-        'handoff\active','handoff\archive','messages\inbox','messages\archive'
-    )
-    foreach ($d in $dirs) {
-        $full = Join-Path $Central $d
-        if (-not (Test-Path $full)) {
-            New-Item -ItemType Directory -Path $full -Force | Out-Null
-        }
-    }
-
-    # Protocol skeleton (always overwrite — controlled by this project)
-    function Download-File {
-        param([string]$Url, [string]$Dest)
-        $temp = $Dest + '.download.' + [Guid]::NewGuid().ToString('N')
-        try {
-            Invoke-WebRequest -UseBasicParsing -Uri $Url -OutFile $temp -ErrorAction Stop
-            Move-Item -LiteralPath $temp -Destination $Dest -Force
-        } finally {
-            if (Test-Path -LiteralPath $temp) {
-                Remove-Item -LiteralPath $temp -Force
-            }
-        }
-    }
-
-    # Docs go BOTH to the central root (user-facing entry points) and into the
-    # skill package (so `ag init` can re-seed from skills\<pkg>\references).
-    foreach ($doc in @('ONBOARDING', 'CONVENTIONS', 'SPEC', 'PORTABILITY')) {
-        Download-File "$RepoRawUrl/references/$doc.md" (Join-Path $Central "$doc.md")
-    }
-    foreach ($doc in @('ONBOARDING', 'CONVENTIONS', 'SPEC', 'PORTABILITY', 'CAPABILITIES', 'LEARNINGS', 'SECURITY', 'dsh')) {
-        Download-File "$RepoRawUrl/references/$doc.md" (Join-Path $Central "skills\agent-guild\references\$doc.md")
-    }
-    foreach ($doc in @('README', 'README_EN')) {
-        Download-File "$RepoRawUrl/$doc.md" (Join-Path $Central "skills\agent-guild\$doc.md")
-    }
-    Download-File "$RepoRawUrl/SKILL.md"      (Join-Path $Central 'skills\agent-guild\SKILL.md')      | Out-Null
-    Download-File "$RepoRawUrl/manifest.json" (Join-Path $Central 'skills\agent-guild\manifest.json') | Out-Null
-    foreach ($module in @('ag.py', 'ag_tasks.py', 'ag_history.py')) {
-        Download-File "$RepoRawUrl/scripts/$module" (Join-Path $Central "skills\agent-guild\scripts\$module") | Out-Null
-    }
-    # Remove the pre-3.0 CLI name if upgrading from an older install
-    Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $Central 'skills\agent-guild\scripts\ac.py')
-
-    # User-owned templates (only seed if missing)
-    function Seed-If-Missing {
-        param([string]$Target, [string]$Url)
-        if (-not (Test-Path $Target)) {
-            try { Download-File $Url $Target } catch {}
-        }
-    }
-    Seed-If-Missing (Join-Path $Central 'identity\profile.md')   "$RepoRawUrl/references/examples/identity-profile.template.md"
-    Seed-If-Missing (Join-Path $Central 'identity\ROUTINE.md')   "$RepoRawUrl/references/examples/identity-routine.template.md"
-    Seed-If-Missing (Join-Path $Central 'rules\universal.md')    "$RepoRawUrl/references/examples/rules-universal.template.md"
-    Seed-If-Missing (Join-Path $Central 'rules\public-repo.md')  "$RepoRawUrl/references/examples/rules-public-repo.template.md"
-    Seed-If-Missing (Join-Path $Central 'rules\file-cleanup.md') "$RepoRawUrl/references/examples/rules-file-cleanup.template.md"
-    Seed-If-Missing (Join-Path $Central 'rules\safety.md')       "$RepoRawUrl/references/examples/rules-safety.template.md"
-    Seed-If-Missing (Join-Path $Central 'toolchain\paths.md')    "$RepoRawUrl/references/examples/toolchain-paths.template.md"
-
-    # Initial state files
-    # No global task context is created or automatically injected.
-
-    $projFile = Join-Path $Central 'projects\active.md'
-    if (-not (Test-Path $projFile)) {
-        @"
-# Active Projects
-
-(Empty. Add the projects you are currently working on.)
-"@ | Set-Content -Path $projFile -Encoding UTF8
-    }
-
-    $registry = Join-Path $Central 'registry.json'
-    if (-not (Test-Path $registry)) {
-        $registryBody = @"
-{
-  "protocol_version": "3.0",
-  "central_dir": "~/.agent-guild/",
-  "agents": {}
+if (-not $PSScriptRoot -or -not (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'ag.py') -PathType Leaf)) {
+    throw '缺少同目录 ag.py；请先下载并检查同一固定提交的安装脚本与 ag.py。'
 }
-"@
-        # PS 5.1's Set-Content -Encoding UTF8 adds a BOM, which Python's
-        # json.loads(...read_text(encoding='utf-8')) rejects.
-        [System.IO.File]::WriteAllText($registry, $registryBody, (New-Object System.Text.UTF8Encoding($false)))
-    }
+$Python = if ($env:AGENT_GUILD_PYTHON) { $env:AGENT_GUILD_PYTHON } else { 'python' }
+if (-not (Get-Command $Python -ErrorAction SilentlyContinue)) {
+    throw '需要 Python 3.9+；可通过 AGENT_GUILD_PYTHON 指定可执行文件。'
+}
+$Version = if ($env:AGENT_GUILD_VERSION) { $env:AGENT_GUILD_VERSION } else { '4.0.0' }
+$env:PYTHONDONTWRITEBYTECODE = '1'
+# 内层只用单引号，避免 PowerShell 5.1 的原生命令参数处理吞掉双引号。
+$Code = "import sys; sys.version_info >= (3, 9) or sys.exit('需要 Python 3.9+'); sys.path.insert(0, sys.argv[1]); import ag; sys.exit(ag._install_release(sys.argv[2]))"
+& $Python -c $Code $PSScriptRoot $Version | Out-Null
+if ($LASTEXITCODE -ne 0) {
+    throw "release 校验或安装失败（退出码 $LASTEXITCODE），未报告安装成功。"
 }
 
-# ── User-facing output (the only thing the user sees) ──────────────
-# Build Chinese strings from UTF-8 bytes to avoid PS 5.1 source-encoding pitfalls.
-$utf8 = [System.Text.Encoding]::UTF8
-$msg1 = $utf8.GetString([byte[]](0xE8,0xAF,0xB7,0xE5,0xA4,0x8D,0xE5,0x88,0xB6,0xE4,0xBB,0xA5,0xE4,0xB8,0x8B,0xE5,0x86,0x85,0xE5,0xAE,0xB9,0xE5,0x8F,0x91,0xE7,0xBB,0x99,0xE4,0xBD,0xA0,0xE7,0x9A,0x84,0x41,0x49))
-$msg2 = $utf8.GetString([byte[]](0xEF,0xBC,0x88,0x50,0x6C,0x65,0x61,0x73,0x65,0x20,0x63,0x6F,0x70,0x79,0x20,0x74,0x68,0x65,0x20,0x6C,0x69,0x6E,0x65,0x20,0x62,0x65,0x6C,0x6F,0x77,0x20,0x74,0x6F,0x20,0x79,0x6F,0x75,0x72,0x20,0x41,0x49,0x20,0x61,0x67,0x65,0x6E,0x74,0xEF,0xBC,0x89,0xEF,0xBC,0x9A))
-
-Write-Host ""
-Write-Host ("  " + $msg1 + $msg2)
-Write-Host ""
-Write-Host "  Read ~/.agent-guild/ONBOARDING.md"
-Write-Host ""
+Write-Host ''
+Write-Host '  请复制以下内容发给你的 AI 助手：'
+Write-Host ''
+Write-Host '  Read ~/.agent-guild/ONBOARDING.md'
+Write-Host ''

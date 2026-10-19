@@ -55,12 +55,22 @@ or other sync tools. Share only within the user's chosen trust boundary.
   It includes old checkpoints, session metadata, orphaned task staging and
   managed recovery. A full budget blocks historical growth; protected items
   do not grant unlimited storage.
-- `history apply` requires a saved, verified plan and explicit confirmation,
-  handles at most ten files, verifies backups, and relocates only candidates to
-  managed quarantine. It does not invoke a shell or physically delete content.
-  Recovery copies remain counted. Follow host-specific requirements for a
-  second confirmation when no system trash is used. Physical release, semantic
-  summarization/compression, and whole-task retirement remain manual.
+- Legacy `history apply` only verifies backups and moves reviewed files into
+  quarantine; it does not free disk. Full retention supports deterministic,
+  source-hashed summaries and verified lossless ZIP compression, whole-package
+  retirement/restore, and an explicit permanent purge workflow.
+- Permanent purge accepts only a sealed exact-file plan plus two distinct
+  confirmation tokens: approval of the file list and separate irreversible
+  last-copy disposal. Verify backups before unlink, process at most ten files
+  per invocation, and recheck policy/references/content. No shell or recursive
+  wildcard deletion is used. Active task data, referenced/held packages and
+  live rules cannot be chosen. Host confirmation/backup requirements still
+  apply; command flags are not evidence of human consent.
+- Recovery and maintenance metadata stay counted. One fixed 64 MiB reserve
+  permits bounded transactional overhead at a full history budget; ordinary
+  task/log writes cannot consume it. Filesystem snapshots may retain physical
+  blocks even after unlink, so report measured logical/allocated changes
+  without promising physical erasure or immediate disk-block reclamation.
 - Historical policy is not a substitute for consent: before any personal-file
   move, show every affected path and risk, obtain approval, and verify backups.
   A noninteractive `--confirm` flag cannot authenticate human approval by itself.
@@ -108,9 +118,9 @@ grep -n -A6 "VERSION_SOURCES" scripts/ag.py
 grep -n "flock\|msvcrt\|ag-lock" scripts/ag.py
 ```
 
-The zero-dependency CLI is split into `scripts/ag.py`, `scripts/ag_tasks.py`
-and `scripts/ag_history.py`, plus two installer scripts. Review all three
-Python modules when auditing storage, selection or retention behavior.
+The zero-dependency CLI is split into `scripts/ag.py`, `scripts/ag_tasks.py`,
+`scripts/ag_history.py` and `scripts/ag_retention.py`, plus two installer scripts.
+Review all four modules when auditing storage, selection or retention behavior.
 
 ## Reporting a concern
 

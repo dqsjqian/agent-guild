@@ -117,6 +117,16 @@ class HandoffIntegrationTests(unittest.TestCase):
         report = self.call(["history", "status"], decode=True)
         self.assertGreaterEqual(report["total_bytes"], 1024 * 1024 * 1024)
 
+    def test_inbox_archive_cannot_bypass_historical_budget(self):
+        self.call(["send", "alpha", "large"], body="unread" * 20000)
+        (self.root / "RETENTION.md").write_text("history_max_bytes=65536\nhistory_target_bytes=32768\n")
+        self.call(["finish", "alpha", "--archive-inbox"], body="short summary", code=1)
+        inbox = self.root / "messages/inbox"
+        archive = self.root / "messages/archive"
+        self.assertEqual(len(list(inbox.glob("*.md"))), 1)
+        self.assertEqual(len(list(archive.glob("*.md"))), 0)
+        self.assertLessEqual(self.call(["history", "status"], decode=True)["total_bytes"], 65536)
+
     def test_legacy_migration_is_preview_only(self):
         old = self.root / "handoff/inbox/from-alice-to-bob-note.md"
         old.parent.mkdir(parents=True, exist_ok=True)

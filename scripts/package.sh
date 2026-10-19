@@ -147,6 +147,18 @@ echo "  contents:"
 
 [ "$fail" = "0" ] || { echo; echo "✖ package has issues — fix them before uploading" >&2; exit 1; }
 
+# 校验文件写在 ZIP 之外，内容仅为完整 SHA-256 和目标 basename。
+# 验证全部成功才替换成品；它提供完整性校验，不是独立发布签名。
+python3 - "$ARCHIVE" "$OUT" "$STAGE/checksum" <<'PY'
+import hashlib, pathlib, sys
+archive, output, checksum = map(pathlib.Path, sys.argv[1:])
+if any(c in output.name for c in "\r\n\\"):
+    raise SystemExit("输出文件名不能包含换行或反斜杠")
+digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+checksum.write_text(f"{digest}  {output.name}\n", encoding="utf-8")
+PY
 mv -f "$ARCHIVE" "$OUT"
+mv -f "$STAGE/checksum" "$OUT.sha256"
 echo
-echo "✔ packaged: $OUT   ($(du -h "$OUT" | cut -f1), layout: references/)"
+echo "packaged: $OUT   ($(du -h "$OUT" | cut -f1), layout: references/)"
+echo "SHA-256: $OUT.sha256"

@@ -17,7 +17,7 @@ description_en: Local shared memory and opt-in task handoff with isolated sessio
 author: dqsjqian
 category: productivity
 protocol_version: "4.0"
-version: "4.0.0"
+version: "4.1.0"
 platforms: ["macos", "windows", "linux", "android", "ios"]
 license: MIT
 homepage: https://github.com/dqsjqian/agent-guild
@@ -165,6 +165,37 @@ blocker. Never silently disable the budget, discard current work, or report
 a failed checkpoint as saved. Physical deletion and personal-file operations
 remain subject to the host's confirmation, backup and trash requirements.
 
+Use the complete retention workflow only on an explicitly reviewed scope:
+
+1. `history compact-plan --id TASK_ID` creates a traceable summary and exact
+   file inventory. `history compact --plan PLAN --confirm TOKEN` verifies a
+   lossless ZIP before replacing original payload files in batches of ten.
+   Metadata remains directly listable; explicit task reopening restores and
+   verifies the full original context and attachments.
+2. `history retire-plan --id TASK_ID`, then `history retire --plan PLAN
+   --confirm TOKEN`, moves an unreferenced closed package into managed recovery.
+   This removes it from archive counts, not from disk. Restore by ticket or ID.
+3. `history purge-plan --ticket TICKET` lists exact recovery copies and the
+   final backup. Show the full file list and irreversible-loss warning, verify
+   that needed decisions/facts are preserved, and obtain a separate explicit
+   approval before `history purge --plan PLAN --confirm TOKEN
+   --confirm-data-loss LOSS_TOKEN`. Only listed managed files are eligible;
+   original project files, active tasks, and live rules cannot be selected.
+4. `history cycle` plans oldest-first compression, retirement and approved
+   recovery disposal. Apply only its exact token; repeat the same approved
+   command while it reports `in_progress`. Each batch is at most ten files,
+   rechecks references and remeasures bytes. Stop at the low watermark, on a
+   changed plan, on no progress, or when protected data blocks the target.
+
+Do not treat a generic "finish the work" or "clean up" request as approval to
+delete real history. Host safety and backup rules remain mandatory. The
+permanent-data-loss token must cover discarding the last backup, not just
+moving files. Physical unlink does not guarantee immediate filesystem block
+reclamation or erase OS snapshots. All recovery copies count until removed.
+A fixed 64 MiB maintenance reserve permits bounded transactional work when the
+normal history budget is full; status reports that excess, and ordinary task
+writes cannot use it. No infinite recovery/report directory is exempt.
+
 Writers use locks and expected revisions. Filesystem locks protect processes
 on one machine, not offline multi-device sync; resolve carrier conflicts
 before writing. A broken/missing package fails closed rather than silently
@@ -187,7 +218,7 @@ The CLI makes no memory uploads. Optional version checks and downloads follow
 | Processes | Fixed OS link/trash utilities with argument arrays; attached scripts are never executed |
 | Reads / writes | User-selected local guild data; task selection limits returned context, not OS permissions |
 | Temporary files / locks | Atomic metadata writes, revision snapshots and local advisory locks; no distributed-lock claim |
-| Moves / recovery | Task closure moves its own package; reviewed history plans verify backups before quarantine; no physical history deletion |
+| Moves / recovery / deletion | Task closure and retirement move whole packages; verified ZIP preserves compressed content; exact purge plans require separate irreversible-loss approval and verified backup before at-most-ten-file unlink batches |
 | Package replacement | Updating this skill replaces protocol code; it does not migrate or delete task history, identity or rules |
 | Environment / device data | Explicit configuration and OS/host identity for local scoping; no credential collection |
 | Permissions | Installer marks this CLI executable; no arbitrary permission escalation |

@@ -734,6 +734,9 @@ def _dispatch(store, args, context, session, catalog):
             raise TaskError("archived", "任务已归档，不能直接写入", task=public)
         if owner not in before["owners"]:
             raise TaskError("not_owner", "当前会话没有写权，请先显式 resume", task=public)
+    if args.command == "reopen" and _path(package / "pack.json", "file", missing=True) is not None:
+        import ag_retention
+        package = ag_retention.restore_for_reopen(api, package, before)
     text, manifest = store.load_content(package, before)
     meta = _bump(before, api)
 

@@ -64,21 +64,45 @@ There is no server or resident process.
 
 ### 1. Create the central directory
 
-macOS / Linux / WSL / Git Bash (Bash and curl required):
+**Download, inspect, then execute; never pipe a network response into a shell.** Obtain the
+installer and its bootstrap CLI from the same reviewed commit, not a mutable `main` branch.
+The security changes in this working tree have not been released; the existing public `4.0.0`
+does not gain them retroactively. For now, prefer a reviewed source checkout below. The new
+installer refuses releases that lack required runtime modules or verifiable checksum metadata.
+
+macOS / Linux / WSL / Git Bash (Bash, curl and Python 3.9+), in an empty directory:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/dqsjqian/agent-guild/main/scripts/install.sh | bash
+SOURCE_COMMIT="REPLACE_WITH_REVIEWED_40_HEX_COMMIT"
+[[ "$SOURCE_COMMIT" =~ ^[0-9a-fA-F]{40}$ ]] || exit 1
+BASE="https://raw.githubusercontent.com/dqsjqian/agent-guild/$SOURCE_COMMIT/scripts"
+curl --proto '=https' --tlsv1.2 -fsSL "$BASE/install.sh" -o install.sh
+curl --proto '=https' --tlsv1.2 -fsSL "$BASE/ag.py" -o ag.py
+less install.sh ag.py
+# After reviewing both files, run separately:
+AGENT_GUILD_VERSION=4.0.0 bash ./install.sh
 ```
 
-Windows (PowerShell 5.1+):
+Windows (PowerShell 5.1+, Python 3.9+), also download and inspect first:
 
 ```powershell
-iwr -useb https://raw.githubusercontent.com/dqsjqian/agent-guild/main/scripts/install.ps1 | iex
+$SourceCommit = 'REPLACE_WITH_REVIEWED_40_HEX_COMMIT'
+if ($SourceCommit -notmatch '^[0-9a-fA-F]{40}$') { throw 'A pinned commit ID is required' }
+$Base = "https://raw.githubusercontent.com/dqsjqian/agent-guild/$SourceCommit/scripts"
+Invoke-WebRequest -UseBasicParsing "$Base/install.ps1" -OutFile install.ps1
+Invoke-WebRequest -UseBasicParsing "$Base/ag.py" -OutFile ag.py
+Get-Content .\install.ps1
+Get-Content .\ag.py
+# After reviewing both files, run separately; do not bypass execution policy:
+$env:AGENT_GUILD_VERSION = '4.0.0'
+.\install.ps1
 ```
 
-The installer downloads the protocol and CLI, seeds templates, and prints the joining instruction.
-It does not modify an assistant's own directories. To inspect the source first, download and read
-the installer before running it.
+The installer reuses the inspected local `ag.py` to verify and install one fixed-tag GitHub
+release ZIP, then seeds missing templates and prints the joining instruction. It does not
+modify an assistant's own directories. `AGENT_GUILD_PYTHON` selects a Python executable;
+`AGENT_GUILD_DIR` selects the runtime directory. Trust in the local bootstrap comes from
+reviewing its source and commit, not from a hash asserted by that same bootstrap.
 
 ### 2. Connect each assistant
 
@@ -101,6 +125,9 @@ workspace of your choice:
 
 ```bash
 git clone https://github.com/dqsjqian/agent-guild agent-guild-source
+# Review the commit and source first; this route trusts the local checkout.
+git -C agent-guild-source rev-parse HEAD
+# After review, run separately (no release verification in this source path):
 python3 agent-guild-source/scripts/ag.py init demo-agent
 ```
 
@@ -133,7 +160,18 @@ python3 "$HOME/.agent-guild/skills/agent-guild/scripts/ag.py" upgrade
 python3 "$HOME/.agent-guild/skills/agent-guild/scripts/ag.py" upgrade --apply
 ```
 
-On Windows, use `python` and the corresponding `$env:USERPROFILE` path. You can also rerun the installer.
+On Windows, use `python` and the corresponding `$env:USERPROFILE` path. You can also rerun the inspected installer.
+The new installer/updater binds the ZIP to one version tag and asset name. It requires the
+GitHub HTTPS release API's `digest = sha256:<64 hex characters>`, or, only when absent, a
+same-release `.zip.sha256` whose single checksum line names exactly the target ZIP basename.
+Missing verification metadata, mismatched hashes or unsafe ZIPs stop installation. This is
+**same-channel integrity checking, not a signature or an independent trust root**; it cannot
+protect against simultaneous compromise of the publisher account or release channel.
+Extraction rejects traversal, duplicate/case-alias paths, links and compression bombs, with
+a 64 MiB expanded-size limit. Failed swaps restore the previous code. At most one
+`.agent-guild.previous-code` backup is retained and rotated during the next verified update;
+it contains protocol code, not user identity, rules or task data. `bash scripts/package.sh`
+creates a full SHA-256 sidecar beside the ZIP; provide both assets when publishing a release.
 Updates replace Agent Guild's protocol files while preserving identity, rules, and project content.
 Linked installations see central updates; copy installations require the assistant's copy to be refreshed.
 See the [update procedure](references/ONBOARDING.md#step-7--update-protocol-how-to-stay-current-as-the-central-skill-evolves).
