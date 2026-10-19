@@ -35,7 +35,7 @@ REPO_RAW_URL="${AGENT_GUILD_REPO:-https://raw.githubusercontent.com/dqsjqian/age
   #   tools/<name>/         shared scripts / utilities (CLI helpers, dotfiles, etc.)
   #   memory/<agent>/       agent-private memory adopted from each runtime
   #   memory/shared/        facts every joined agent should know
-  mkdir -p "$CENTRAL"/{skills/agent-guild/scripts,skills/agent-guild/references,skills_data,mcp,plugins,tools,memory/shared,identity,rules,toolchain,projects,hosts,log/daily,log/decisions,log/archive,handoff/inbox,handoff/archive,handoff/shared-state}
+  mkdir -p "$CENTRAL"/{skills/agent-guild/scripts,skills/agent-guild/references,skills_data,mcp,plugins,tools,memory/shared,identity,rules,toolchain,projects,hosts,log/daily,log/decisions,log/archive,handoff/active,handoff/archive,messages/inbox,messages/archive}
 
   # Download beside the destination, then replace it only after success. A
   # failed transfer must not truncate a working install or hide its error.
@@ -64,7 +64,9 @@ REPO_RAW_URL="${AGENT_GUILD_REPO:-https://raw.githubusercontent.com/dqsjqian/age
   done
   download_file "$REPO_RAW_URL/SKILL.md" "$CENTRAL/skills/agent-guild/SKILL.md"
   download_file "$REPO_RAW_URL/manifest.json" "$CENTRAL/skills/agent-guild/manifest.json"
-  download_file "$REPO_RAW_URL/scripts/ag.py" "$CENTRAL/skills/agent-guild/scripts/ag.py"
+  for module in ag.py ag_tasks.py ag_history.py; do
+    download_file "$REPO_RAW_URL/scripts/$module" "$CENTRAL/skills/agent-guild/scripts/$module"
+  done
   chmod +x "$CENTRAL/skills/agent-guild/scripts/ag.py" 2>/dev/null || true
   # Remove the pre-3.0 CLI name if upgrading from an older install
   rm -f "$CENTRAL/skills/agent-guild/scripts/ac.py" 2>/dev/null || true
@@ -85,15 +87,7 @@ REPO_RAW_URL="${AGENT_GUILD_REPO:-https://raw.githubusercontent.com/dqsjqian/age
   seed_if_missing "$CENTRAL/toolchain/paths.md"    "$REPO_RAW_URL/references/examples/toolchain-paths.template.md"
 
   # Initial state files
-  if [ ! -f "$CENTRAL/handoff/shared-state/current-focus.md" ]; then
-    cat > "$CENTRAL/handoff/shared-state/current-focus.md" <<'EOF'
-# Current Focus
-
-> Last updated: <date> by <agent-name>
-
-(Empty — no active task. Update this file when you start substantive work.)
-EOF
-  fi
+  # Task contexts are created only for explicit work, never as a global focus.
 
   if [ ! -f "$CENTRAL/projects/active.md" ]; then
     cat > "$CENTRAL/projects/active.md" <<'EOF'

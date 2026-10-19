@@ -20,7 +20,7 @@ Commands:
                           abort with a pointer to `adopt --apply` first
   adopt [agent]           Scan agent home for adoptable assets (DRY-RUN report)
   adopt --apply [agent]   Move assets into the guild + link back
-  bootstrap [agent]      Print core shared context (identity/rules/projects/focus)
+  bootstrap [agent]      Print identity/routine/rules only (no task context)
                           --no-maintenance skips grooming and upgrade checks
   recall <kw> [...]       Search shared memory (identity/rules/projects/memory/
                           handoff/logs/learnings) — AND by default; --all = OR,
@@ -45,7 +45,11 @@ Commands:
   last-seen <agent>       Refresh an agent's presence
   send <dst> <topic>      Write an inbox message from stdin
   log <agent> <title>     Append a daily log entry from stdin
-  focus <agent> <title>   Update current-focus from stdin
+  task <action>           Create/list/resume/checkpoint/attach/release/close/reopen
+  history <action>        History status/plan and explicitly confirmed maintenance
+  inbox [agent]           Explicitly list this agent's message filenames
+  migrate [--dry-run]     Preview legacy message locations (never auto-migrates)
+  focus                   Retired; use task checkpoints
   learn <agent> <kind> "<summary>"   Learning-ledger entry (details from stdin)
                           kind: learning | error | featreq
                           opts: --area A --priority P --category C --pattern-key K
@@ -91,14 +95,14 @@ CENTRAL = Path(os.environ.get("AGENT_GUILD_DIR", "~/.agent-guild")).expanduser()
 REGISTRY = CENTRAL / "registry.json"
 AUDIT = CENTRAL / "log" / "audit.jsonl"
 DAILY = CENTRAL / "log" / "daily"
-INBOX = CENTRAL / "handoff" / "inbox"
+INBOX = CENTRAL / "messages" / "inbox"
 FOCUS = CENTRAL / "handoff" / "shared-state" / "current-focus.md"
 VERSION = CENTRAL / "VERSION"
 LEARNINGS = CENTRAL / "learnings"
 HOSTS = CENTRAL / "hosts"
 TOOLS = CENTRAL / "tools"
 
-PROTOCOL_VERSION = "3.3"
+PROTOCOL_VERSION = "4.0"
 
 # ------------------------------------------------------------ portability ---
 
@@ -342,8 +346,7 @@ GITHUB_RELEASE_ZIP = (
 
 SKELETON = [
     "identity", "rules", "toolchain", "projects",
-    "handoff/inbox", "handoff/archive", "handoff/shared-state",
-    "handoff/shared-state/archive",
+    "handoff/active", "handoff/archive", "messages/inbox", "messages/archive",
     "log/daily", "log/decisions", "log/archive", "learnings", "learnings/archive",
     "skills", "skills_data", "mcp", "plugins", "tools", "memory", "connectors",
     "hosts",
@@ -354,7 +357,6 @@ PLACEHOLDERS = {
     "identity/ROUTINE.md": "# Daily routine\n\n_Schedule, habits, commute, working hours._\n",
     "rules/universal.md": "# Universal rules (highest priority)\n\n_Mandatory commandments every agent obeys._\n",
     "projects/active.md": "# Active projects\n\n_What the user is working on right now._\n",
-    "handoff/shared-state/current-focus.md": "# Current Focus\n\n_Latest focus block goes on top._\n",
     "memory/README.md": (
         "# memory/\n\n"
         "Cross-agent memory. Agent-private memory files adopted from each\n"
@@ -391,12 +393,18 @@ PLACEHOLDERS = {
         "daily_log_days = 90        # log/daily/ files older -> log/archive/\n"
         "focus_days = 30            # current-focus blocks older -> shared-state/archive/\n"
         "focus_blocks = 20          # ...and beyond this many live blocks\n"
-        "inbox_archive_days = 60    # handoff/archive/ messages older -> .trash/\n"
+        "inbox_archive_days = 60    # processed messages: review candidates\n"
         "audit_max_lines = 2000     # audit.jsonl beyond this rotates\n"
         "audit_keep_lines = 1000    # newest lines kept after rotation\n"
         "ledger_resolved_days = 120 # resolved ledger entries older -> learnings/archive/\n"
         "trash_days = 30            # .trash/ items older -> reported for manual emptying\n"
         "groom_interval_hours = 24  # auto-groom cooldown\n"
+        "history_max_bytes = 1073741824      # one shared 1 GiB history budget\n"
+        "history_target_bytes = 838860800    # 800 MiB low watermark\n"
+        "history_full_days = 30              # review old full archives\n"
+        "history_retention_days = 180        # retirement candidates, not auto-delete\n"
+        "history_max_tasks = 2000            # review archive count\n"
+        "history_check_interval_hours = 24   # check on use, no daemon\n"
         "```\n"
     ),
     "UPGRADE.md": (
@@ -486,9 +494,12 @@ def now_iso() -> str:
 
 def audit(action: str, detail: dict) -> None:
     line = json.dumps({"ts": now_iso(), "action": action, **detail}, ensure_ascii=False)
+    import ag_history
     with _append_lock(AUDIT):
-        with AUDIT.open("a", encoding="utf-8") as f:
-            f.write(line + "\n")
+        with ag_history.budget_lock(sys.modules[__name__]):
+            ag_history.ensure_capacity(sys.modules[__name__], len((line + "\n").encode("utf-8")))
+            with AUDIT.open("a", encoding="utf-8") as f:
+                f.write(line + "\n")
 
 
 def atomic_write_json(path: Path, data) -> None:
@@ -548,8 +559,15 @@ def _append_lock(path: Path):
 
 
 def atomic_append(path: Path, content: str) -> None:
+    import ag_history
+    # Existing legacy writers may already hold another file's lock. Always
+    # acquire their destination lock before the shared budget lock; never
+    # call an API that acquires a file lock while holding the budget lock.
     with _append_lock(path):
-        _append_unlocked(path, content)
+        with ag_history.budget_lock(sys.modules[__name__]):
+            old_bytes = path.stat().st_size if path.exists() else 0
+            ag_history.ensure_capacity(sys.modules[__name__], old_bytes + len(content.encode("utf-8")) + 2)
+            _append_unlocked(path, content)
 
 
 def _append_unlocked(path: Path, content: str) -> None:
@@ -1635,8 +1653,6 @@ BOOTSTRAP_FILES = [
     ("identity/profile.md", "WHO THE USER IS"),
     ("identity/ROUTINE.md", "ROUTINE"),
     ("rules/universal.md", "SHARED RULES (user-authored)"),
-    ("projects/active.md", "ACTIVE PROJECTS"),
-    ("handoff/shared-state/current-focus.md", "CURRENT FOCUS"),
 ]
 
 
@@ -1665,11 +1681,8 @@ def cmd_bootstrap(args: list) -> int:
     print(f"others   : {', '.join(others) if others else '(none seen yet)'}")
     print(f"host data: hosts/{hid}/   (paths, install state, device-only facts)")
     print("platform assets: resolve with `ag tool <name>` — never hardcode a path")
-    notes = host_dir() / HOST_NOTES
-    if notes.is_file():
-        body = notes.read_text(encoding="utf-8").rstrip()
-        if body:
-            print(f"\n-- hosts/{hid}/{HOST_NOTES} --\n{body}")
+    # Host notes can contain task details. Resolve them only after an explicit
+    # task selection; a new conversation must not inherit another task.
 
     for rel, title in BOOTSTRAP_FILES:
         p = CENTRAL / rel
@@ -1680,11 +1693,10 @@ def cmd_bootstrap(args: list) -> int:
         else:
             print(f"[missing: {rel}]")
 
-    # Unread inbox for this agent
-    if INBOX.is_dir():
-        mine = [f.name for f in _inbox_messages(agent)]
-        print(f"\n{'=' * 78}\n== INBOX for {agent}\n{'=' * 78}")
-        print("\n".join(f"  {m}" for m in mine) if mine else "  (empty)")
+    # Do not inject message topics or task metadata into an unrelated session.
+    print("\nTask context: not loaded. Ask for todos, then select a task.")
+    print("Use `ag task list --session <session-id> --agent <agent>` only on request.")
+    print("Messages are separate: `ag inbox <agent>` (explicit request only).")
 
     # Other rules files, listed not dumped (read on demand)
     extra = sorted(p.name for p in (CENTRAL / "rules").glob("*.md")
@@ -1701,11 +1713,7 @@ def cmd_bootstrap(args: list) -> int:
         n_open = sum(1 for e in entries
                      if _field(e, "Status") in ("", "pending", "in_progress"))
         if n_open:
-            top = next((e for e in entries
-                        if _field(e, "Status") in ("", "pending", "in_progress")
-                        and _field(e, "Priority") in ("high", "critical")), None)
-            hint = f" — top: {top['id']} {_summary_of(top)}" if top else ""
-            led.append(f"{path.stem} {n_open} open{hint}")
+            led.append(f"{path.stem} {n_open} open")
     if led:
         print(f"\nLearning ledger (learnings/): {' | '.join(led)}")
         print("  fix what you touch (ag resolve), promote what recurs (ag review).")
@@ -1718,6 +1726,9 @@ def cmd_bootstrap(args: list) -> int:
     # slowly rots. Prints only when something was found; never fails.
     if "--no-maintenance" not in args:
         maybe_auto_groom(agent)
+
+    if "--no-maintenance" not in args:
+        _history_maintenance()
 
     # Upgrade self-check (3.9.0+): once per interval_hours, compare against
     # the published version; mode=apply installs it. Policy: UPGRADE.md.
@@ -1733,7 +1744,7 @@ def cmd_bootstrap(args: list) -> int:
 # stay out: a memory query must not surface another device's install noise.
 RECALL_ROOTS = (
     "identity", "rules", "projects", "memory",
-    "handoff/shared-state", "handoff/inbox", "handoff/archive",
+    "messages/inbox", "messages/archive",
     "log/daily", "log/archive", "learnings",
 )
 
@@ -1838,6 +1849,9 @@ def cmd_finish(args: list) -> int:
         return 1
 
     # 1) session summary -> today's daily log (lock-protected atomic append)
+    if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", agent):
+        print("invalid agent identifier", file=sys.stderr)
+        return 2
     path = _daily_log_path(agent)
     atomic_append(path, f"\n## Session summary — {now_iso()} by {agent}\n\n{body}\n")
 
@@ -1850,7 +1864,7 @@ def cmd_finish(args: list) -> int:
     mine = _inbox_messages(agent)
     archived = 0
     if mine and archive_inbox:
-        archive_dir = _session_path("handoff/archive", write=True)
+        archive_dir = _session_path("messages/archive", write=True)
         for f in mine:
             # Match send's lock so a pending append cannot land in a file
             # being moved. Keep its sidecar stable for later senders.
@@ -1866,7 +1880,7 @@ def cmd_finish(args: list) -> int:
                         suffix += 1
                     shutil.move(str(f), str(dest))
                 archived += 1
-        print(f"archived {archived} inbox message(s) -> handoff/archive/")
+        print(f"archived {archived} inbox message(s) -> messages/archive/")
     elif mine:
         print(f"{len(mine)} inbox message(s) still pending — process them, "
               f"then re-run with --archive-inbox")
@@ -1874,6 +1888,7 @@ def cmd_finish(args: list) -> int:
     audit("finish", {"agent": agent, "log": f"log/daily/{path.name}",
                      "archived_inbox": archived})
     print(f"session closed for {agent} — summary in log/daily/{path.name}")
+    _history_maintenance()
     return 0
 
 
@@ -2725,10 +2740,13 @@ def cmd_send(args: list) -> int:
         print("empty message body", file=sys.stderr)
         return 2
     src = os.environ.get("AG_AGENT") or "unknown"
-    safe_topic = re.sub(r"[^A-Za-z0-9._-]", "-", topic)
+    if not all(re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", value) for value in (src, dst)):
+        print("sender and recipient must be lowercase agent identifiers", file=sys.stderr)
+        return 2
+    safe_topic = re.sub(r"[^A-Za-z0-9._-]", "-", topic)[:100]
     fname = f"from-{src}-to-{dst}-{safe_topic}.md"
     atomic_append(INBOX / fname, body)
-    audit("send", {"from": src, "to": dst, "file": f"handoff/inbox/{fname}"})
+    audit("send", {"from": src, "to": dst, "file": f"messages/inbox/{fname}"})
     print(f"sent to {dst}: {fname}")
     return 0
 
@@ -2738,6 +2756,9 @@ def cmd_log(args: list) -> int:
         print("usage: ag log <agent> <title>  (body from stdin)", file=sys.stderr)
         return 2
     agent, title = args[0], args[1]
+    if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", agent):
+        print("invalid agent identifier", file=sys.stderr)
+        return 2
     body = read_stdin()
     if not body:
         print("empty log body", file=sys.stderr)
@@ -2749,20 +2770,76 @@ def cmd_log(args: list) -> int:
 
 
 def cmd_focus(args: list) -> int:
-    if len(args) < 2:
-        print("usage: ag focus <agent> <title>  (body from stdin)", file=sys.stderr)
+    print("Global focus writes are retired. Use `ag task create` or "
+          "`ag task checkpoint` for the selected task; legacy data is untouched.",
+          file=sys.stderr)
+    return 2
+
+
+def cmd_task(args: list) -> int:
+    import ag_tasks
+    return ag_tasks.run(args, sys.modules[__name__])
+
+
+def cmd_history(args: list) -> int:
+    import ag_history
+    return ag_history.run(args, sys.modules[__name__])
+
+
+def _history_maintenance() -> None:
+    import ag_history
+    try:
+        result = ag_history.maintenance(sys.modules[__name__])
+        if result.get("checked"):
+            print("History maintenance checked; request `ag history status` "
+                  "or `ag history plan` for details. No task context loaded.")
+    except (OSError, ValueError, RuntimeError):
+        # Paths and task metadata in an exception may belong to other work.
+        print("History maintenance blocked; request `ag history status` for details.",
+              file=sys.stderr)
+
+
+def cmd_inbox(args: list) -> int:
+    agent = default_agent(args)
+    if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", agent):
+        print("invalid agent name", file=sys.stderr)
         return 2
-    agent, title = args[0], args[1]
-    body = read_stdin()
-    block = (f"> Last updated: {now_iso()} by {agent} @{host_id()}\n\n"
-             f"## {title}\n\n{body}\n\n---\n")
-    with _append_lock(FOCUS):
-        existing = FOCUS.read_text(encoding="utf-8") if FOCUS.exists() else ""
-        existing = re.sub(r"^#\s*Current Focus\s*\n+", "", existing.lstrip())
-        new = "# Current Focus\n\n" + block + existing
-        _atomic_write_text(FOCUS, new)
-    audit("focus", {"agent": agent, "title": title})
-    print(f"current-focus updated by {agent}")
+    print(json.dumps({"agent": agent, "messages": [
+        str(p.relative_to(CENTRAL)) for p in _inbox_messages(agent)
+    ]}, ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_migrate(args: list) -> int:
+    """Read-only, explicit v3 inventory. Never guesses tasks from old logs."""
+    if args not in ([], ["--dry-run"]):
+        print("Migration is preview-only. Review and back up the listed files "
+              "before authorizing a separate migration.", file=sys.stderr)
+        return 2
+    rows = []
+    for old, new in (("handoff/inbox", "messages/inbox"),
+                     ("handoff/archive", "messages/archive")):
+        base = CENTRAL / old
+        if base.is_symlink():
+            print(f"refusing linked legacy directory: {old}", file=sys.stderr)
+            return 1
+        if not base.is_dir():
+            continue
+        for p in sorted(base.iterdir()):
+            # Task directories in the new archive are never legacy messages.
+            if p.suffix != ".md" or p.name.startswith("."):
+                continue
+            if p.is_symlink() or not p.is_file():
+                print(f"refusing non-regular legacy file: {p.name}", file=sys.stderr)
+                return 1
+            rows.append({"source": str(p.relative_to(CENTRAL)),
+                         "destination": f"{new}/{p.name}", "bytes": p.stat().st_size,
+                         "destination_exists": (CENTRAL / new / p.name).exists()})
+    focus = CENTRAL / "handoff/shared-state"
+    print(json.dumps({"mode": "preview", "files": rows,
+                      "legacy_focus_present": focus.exists(),
+                      "focus_policy": "retain as historical evidence; never infer active tasks",
+                      "mutated": False}, ensure_ascii=False, indent=2))
     return 0
 
 
@@ -3204,26 +3281,18 @@ def _groom(cfg: dict, dry_run: bool = False):
                         acts.append(f"rotated audit.jsonl: {len(head)} old line(s) -> "
                                     f"log/archive/, {len(tail)} kept")
 
-    # -- 5. expire old archived handoff messages -> recoverable trash -------
-    h_archive = CENTRAL / "handoff" / "archive"
+    # -- 5. report old messages; retirement needs an explicit reviewed plan --
+    h_archive = CENTRAL / "messages" / "archive"
     expired = []
-    if h_archive.is_dir():
+    if h_archive.is_dir() and not h_archive.is_symlink():
         for f in sorted(h_archive.iterdir()):
-            try:
-                if (f.is_file() and f.suffix == ".md" and not f.name.startswith(".")
-                        and (now.timestamp() - f.stat().st_mtime) > cfg["inbox_archive_days"] * 86400):
-                    expired.append(f)
-            except OSError:
-                continue
+            if (not f.is_symlink() and f.is_file() and f.suffix == ".md"
+                    and not f.name.startswith(".")
+                    and (now.timestamp() - f.stat().st_mtime) > cfg["inbox_archive_days"] * 86400):
+                expired.append(f)
     if expired:
-        if dry_run:
-            acts.append(f"would trash {len(expired)} archived message(s) older than "
-                        f"{cfg['inbox_archive_days']}d (recoverable)")
-        else:
-            for f in expired:
-                to_trash(f)
-            acts.append(f"trashed {len(expired)} archived message(s) older than "
-                        f"{cfg['inbox_archive_days']}d (recoverable in .trash/)")
+        notes.append(f"{len(expired)} processed message(s) need retention review; "
+                     "use `ag history plan` (no automatic removal)")
 
     # -- 6. report-only findings (never auto-fixed) --------------------------
     if INBOX.is_dir():
@@ -3296,16 +3365,16 @@ def maybe_auto_groom(agent: str) -> None:
         cfg = load_retention()
         if not _groom_due(cfg):
             return
-        acts, notes = _groom(cfg, dry_run=False)
+        # Automatic maintenance is a read-only plan. Applying file moves
+        # requires the user's reviewed, explicit maintenance action.
+        acts, notes = _groom(cfg, dry_run=True)
         _record_groom(acts, notes)
         audit("groom", {"agent": agent, "auto": True,
                         "actions": len(acts), "notes": len(notes)})
         if acts or notes:
             print(f"\n== AUTO-GROOM (data hygiene — policy: RETENTION.md) ==")
-            for a in acts:
-                print(f"  ✓ {a}")
-            for n in notes:
-                print(f"  ! {n}")
+            print(f"  {len(acts)} maintenance action(s), {len(notes)} note(s). "
+                  "Details withheld from unrelated sessions; request a maintenance plan.")
     except Exception as e:  # hygiene must never break the session contract
         print(f"  (auto-groom skipped: {e})")
 
@@ -3410,9 +3479,8 @@ def maybe_auto_upgrade(agent: str) -> None:
 
 
 def cmd_groom(args: list) -> int:
-    """Data hygiene: archive expired logs/focus/ledgers, rotate the audit
-    trail, trash stale archived messages, report degradation. Default applies;
-    --dry-run only reports. Never hard-deletes."""
+    """Explicit legacy rotations; --dry-run reports only. No hard deletion.
+    Task archive retirement is handled by reviewed `history` plans."""
     if not CENTRAL.exists():
         print(f"{CENTRAL} missing — run `ag init` first", file=sys.stderr)
         return 1
@@ -3490,6 +3558,10 @@ def main() -> int:
         "bootstrap": cmd_bootstrap,
         "recall": cmd_recall,
         "finish": cmd_finish,
+        "task": cmd_task,
+        "history": cmd_history,
+        "inbox": cmd_inbox,
+        "migrate": cmd_migrate,
         "doctor": cmd_doctor,
         "platform": cmd_platform,
         "tool": cmd_tool,
@@ -3513,7 +3585,11 @@ def main() -> int:
     if fn is None:
         print(f"unknown command: {cmd}\n\n{__doc__}", file=sys.stderr)
         return 2
-    return fn(args)
+    try:
+        return fn(args)
+    except (OSError, ValueError, RuntimeError) as exc:
+        print(f"{cmd} failed: {exc}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

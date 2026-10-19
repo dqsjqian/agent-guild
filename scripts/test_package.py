@@ -40,7 +40,8 @@ class PackageTests(unittest.TestCase):
         self.assertTrue(archive.is_file())
         with zipfile.ZipFile(archive) as package:
             names = package.namelist()
-            self.assertIn("agent-guild/scripts/ag.py", names)
+            for module in ("ag.py", "ag_tasks.py", "ag_history.py"):
+                self.assertIn("agent-guild/scripts/" + module, names)
             self.assertIn("agent-guild/README.md", names)
             self.assertIn("agent-guild/README_EN.md", names)
             self.assertFalse(any("__pycache__" in name or name.endswith(".pyc")

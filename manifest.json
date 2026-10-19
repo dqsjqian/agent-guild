@@ -1,8 +1,8 @@
 {
   "$schema": "https://github.com/dqsjqian/agent-guild/raw/main/spec/manifest.schema.json",
   "name": "agent-guild",
-  "protocol_version": "3.3",
-  "skill_version": "3.12.0",
+  "protocol_version": "4.0",
+  "skill_version": "4.0.0",
   "spec_url": "https://github.com/dqsjqian/agent-guild/blob/main/references/SPEC.md",
   "onboarding_url": "https://github.com/dqsjqian/agent-guild/blob/main/references/ONBOARDING.md",
   "skill_url": "https://github.com/dqsjqian/agent-guild/blob/main/SKILL.md",
@@ -21,7 +21,9 @@
       "rules/": "shared rules (universal, public-repo, file-cleanup, safety)",
       "toolchain/": "shared toolchain pointers",
       "projects/": "active projects",
-      "handoff/": "shared-state + inbox + archive",
+      "handoff/": "active/<task-directory> + archive/<same-directory>; explicit task selection only",
+      "messages/": "inbox + archive for independent agent messages",
+      "history/": "bounded maintenance state, reviewed plans and managed recovery",
       "log/": "daily logs (per-agent) + decisions + archive",
       "learnings/": "cross-agent self-improvement ledgers: LEARNINGS.md (corrections/gaps/best practices) + ERRORS.md (failures) + FEATURE_REQUESTS.md (missing capabilities) — see references/LEARNINGS.md (protocol 3.1+)",
       "registry.json": "agent presence + install metadata",
@@ -58,14 +60,16 @@
     "toolchain_publishing": "toolchain/publishing.md",
     "projects_active": "projects/active.md",
     "registry": "registry.json",
-    "shared_state": "handoff/shared-state/current-focus.md",
+    "task_active_pattern": "handoff/active/{YYYYMMDD}-{12-hex-id}-{short-title}/meta.json",
+    "task_archive_pattern": "handoff/archive/{same-directory}/meta.json",
+    "task_sessions": "hosts/{host-id}/task-sessions/",
     "daily_log_pattern": "log/daily/{YYYY-MM-DD}-{agent-name}.md",
     "decision_pattern": "log/decisions/{YYYY-MM-DD}-{title}.md",
     "learnings_ledger": "learnings/LEARNINGS.md",
     "errors_ledger": "learnings/ERRORS.md",
     "feature_requests_ledger": "learnings/FEATURE_REQUESTS.md",
     "learning_entry_id_pattern": "{LRN|ERR|FEAT}-{YYYY-MM-DD}-{XXX}",
-    "inbox_pattern": "handoff/inbox/from-{src}-to-{dst}-{topic}.md",
+    "inbox_pattern": "messages/inbox/from-{src}-to-{dst}-{topic}.md",
     "portability": "references/PORTABILITY.md",
     "tool_manifest_pattern": "tools/{tool-name}/tool.json",
     "host_state_pattern": "hosts/{host-id}/{host.json,host-notes.md,VERSION,groom.json}",
@@ -82,8 +86,8 @@
     "runtime": {
       "ref": "SKILL.md",
       "frequency": "every relevant turn for an already-joined agent",
-      "trigger": "any operation requiring shared identity, rules, current-focus, inbox, daily log, or handoff",
-      "summary": "Read shared identity/rules; read/update current-focus; check inbox / send messages; append daily log; refresh last_seen"
+      "trigger": "shared identity/rules, explicit todos request, selected task continuation, current-task checkpoint or independent message",
+      "summary": "Bootstrap background only; list metadata on request; resume only the selected task; checkpoint proactively and archive only on closure"
     }
   },
   "actions": {
@@ -103,7 +107,7 @@
       "write_mode": "move_and_symlink"
     },
     "bootstrap": {
-      "summary": "Read core shared context and list this agent's inbox. By default also run rate-limited grooming (RETENTION.md) and upgrade checks (UPGRADE.md); mode=apply can install updates. --no-maintenance reads context without either hook. Recall retrieves additional memory on demand.",
+      "summary": "Read identity/routine/universal rules only, never task context, global focus, project progress or inbox topics. Optional maintenance checks are report-only; update policy remains configurable. --no-maintenance skips these hooks.",
       "cmd": "python3 <skill_dir>/scripts/ag.py bootstrap <agent> [--no-maintenance]",
       "write_mode": "policy_controlled_maintenance"
     },
@@ -165,12 +169,18 @@
       "summary": "Edit rules/*.md or toolchain/*.md with local-replace, never Write/overwrite",
       "write_mode": "edit_in_place"
     },
-    "update_shared_state": {
-      "summary": "Edit handoff/shared-state/current-focus.md to reflect current task",
-      "write_mode": "edit_in_place"
+    "task": {
+      "summary": "Independent task packages with metadata-only lists, explicit selection, session ownership, expected revisions, immutable snapshots and whole-package closure",
+      "cmd": "python3 <skill_dir>/scripts/ag.py task <action>",
+      "write_mode": "locked_revision_checked"
+    },
+    "history": {
+      "summary": "One configurable 1 GiB historical budget; status and reviewed maintenance plans, protected references, no automatic destructive cleanup",
+      "cmd": "python3 <skill_dir>/scripts/ag.py history <action>",
+      "write_mode": "explicitly_confirmed_maintenance"
     },
     "send_message": {
-      "summary": "Append a local handoff/inbox/from-<src>-to-<dst>-<topic>.md message. This does not wake or contact the receiving runtime; it reads the inbox on a later session.",
+      "summary": "Append a local messages/inbox/from-<src>-to-<dst>-<topic>.md message. This does not wake or contact the receiving runtime; it reads the inbox on a later session.",
       "write_mode": "append"
     },
     "register": {
@@ -262,11 +272,13 @@
     "process_creation": "OS trash helpers (trash / trash-put / gio trash), PowerShell Recycle Bin, and `cmd /c mklink /J` when symlinks need elevation. Fixed argument vectors, never a shell string.",
     "temp_files": "Atomic writes (temp file in the same dir, then os.replace), upgrade staging, and probing whether this device supports symlinks. Concurrent appends to the same file (daily log, learning ledgers) are serialized with an advisory lock on a sidecar `.<name>.ag-lock` file (fcntl on POSIX, msvcrt on Windows), so two agents writing at the same moment cannot lose entries; lock files hold no data and stay next to their target inside ~/.agent-guild/.",
     "env_vars": "AGENT_GUILD_DIR, AG_AGENT, AG_HOST_ID, AG_PLATFORM, APPDATA, PREFIX, ANDROID_ROOT. No credentials are read.",
-    "deletes": "Never hard-deletes. Deletes go to the OS trash or ~/.agent-guild/.trash/<timestamp>/. Links are unlinked, never trashed. rmtree only on temp/staging dirs created in the same run.",
+    "deletes": "Task/history maintenance never physically deletes stored history; reviewed candidates move to managed quarantine. Existing link/adoption utilities use OS trash or recoverable trash. Protocol upgrades replace this skill's code directory; temporary staging and completed transition journals are removed. No automatic task-history deletion.",
+    "task_handoff": "Metadata-only todo lists on request; only selected tasks return context. Independent host/session/agent ownership, expected revisions, immutable snapshots, hashed attachments and whole-package closure. Scripts are never auto-executed; local locks are not distributed locks.",
+    "history_budget": "One configurable 1 GiB default historical budget, including old checkpoints, session bindings and managed recovery. Status and plans are read-only by default; apply requires explicit confirmation, validates exact files and backups, handles at most ten files, and reports zero physical bytes freed. Automatic compression and whole-task retirement are not implemented.",
     "writes": "Inside ~/.agent-guild/. Outside it, only the links an agent asks for during adopt / link-root / port, which point back into the guild.",
     "permissions": "chmod +x on this project's own scripts/ag.py and scripts/install.sh after download.",
     "system_info": "OS tag, CPU architecture, hostname, Python version and link capability, used to tell devices apart. Written to hosts/<host-id>/host.json locally, never transmitted; AG_HOST_ID overrides the hostname.",
-    "file_moves": "adopt / link-root / port preview by default and apply only within the selected scope. groom applies retention unless --dry-run; bootstrap may invoke it automatically unless --no-maintenance. Data is archived or moved to recoverable trash; credentials are excluded from adoption.",
+    "file_moves": "adopt / link-root / port preview by default and apply only within the selected scope. groom applies retention only on an explicit manual call; startup grooming is report-only and --no-maintenance skips checks. Data is archived or moved to recoverable trash; credentials are excluded from adoption.",
     "instruction_shaped_text": "references/ONBOARDING.md documents a joining procedure in the imperative because it is a procedure. It runs only when the user asks to join, stated at the top of the file. The skill never asks an agent to conceal actions, bypass host confirmation, or escalate privileges."
   }
 }

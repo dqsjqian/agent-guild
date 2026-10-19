@@ -27,7 +27,10 @@ ag register <agent> <home> <tier>  # join (tier: symlink|copy|readonly)
 ag last-seen <agent>               # refresh presence
 echo "<body>" | ag send <dst> <topic>        # handoff message
 echo "<body>" | ag log <agent> "<title>"     # daily log
-echo "<body>" | ag focus <agent> "<title>"   # update current-focus
+ag task <action>                   # task packages; see Capability 2
+ag history <action>                # shared historical budget; see Capability 9
+ag inbox <agent>                   # explicit message listing
+ag migrate --dry-run               # legacy locations, preview only
 echo "<body>" | ag learn <agent> <kind> "<summary>"  # learning ledger entry
                                              #   kind: learning|error|featreq
                                              #   opts: --area X --priority Y --pattern-key K
@@ -50,7 +53,7 @@ ag prune 30                        # list idle agents
 | `~/.agent-guild/rules/file-cleanup.md` | File deletion preferences |
 | `~/.agent-guild/rules/safety.md` | Safety guardrails |
 | `~/.agent-guild/projects/active.md` | What the user is working on |
-| `~/.agent-guild/handoff/shared-state/current-focus.md` | What any agent is focused on now |
+| `~/.agent-guild/handoff/active/*/meta.json` | Pending task metadata; explicit todos request only |
 | `~/.agent-guild/toolchain/*.md` | Tool-specific config — read on demand |
 
 Read on demand; don't slurp everything every turn.
@@ -58,15 +61,62 @@ Read on demand; don't slurp everything every turn.
 For a context-only read, use `ag bootstrap <agent> --no-maintenance`; this
 skips automatic grooming and version checks without changing saved policies.
 
-## Capability 2 — Update current-focus
+## Capability 2 — Task packages and explicit continuation
 
-`current-focus.md` is the "what's hot right now" board. When you start or
-finish a major task, prepend your block (`ag focus` or manual Edit in place).
-Never rewrite history other agents wrote.
+`bootstrap` loads **three background files only**: identity, routine, universal
+rules. It does not read project progress, host notes, global focus, task metadata
+or bodies. `ag focus` is retired and returns an error without modifying old files.
+Use a unique `SID` for each conversation, never an agent name.
+
+```bash
+# Current request only. Context comes from stdin, not a guessed older task.
+ag task create --title "Example task" --project demo --session SID --agent alice --summary "Next action"
+ag task list --session SID --agent bob
+# After the user picks a number from the returned list_id:
+ag task resume --session SID --agent bob --list LIST_ID --number 2
+# Or an explicitly selected stable ID:
+ag task resume --session SID --agent bob --id TASK_ID
+# On ownership conflict, ask before retrying with --handover or --collaborate.
+ag task checkpoint --id TASK_ID --session SID --agent bob --expected-revision 3 --status waiting
+ag task attach --id TASK_ID --session SID --agent bob --expected-revision 4 --file /absolute/example.png
+ag task release --id TASK_ID --session SID --agent bob --expected-revision 5
+ag task close --id TASK_ID --session SID --agent bob --expected-revision 6 --evidence "Verified acceptance criteria"
+ag task list --session SID --agent bob --archive
+ag task reopen --id TASK_ID --session SID --agent bob --expected-revision 7
+```
+
+Example revisions are illustrative: always use the actual returned revision.
+`create` and `checkpoint` read complete context from stdin. `checkpoint` can
+change `--title`, `--project`, `--summary` without renaming the task directory.
+Metadata-only `list` supports `--project` and explicit `--archive` filtering.
+Changing a list, selecting a stale revision, or using another session's list
+fails closed. `attach` copies one regular file, optionally named with `--name`;
+it never executes it or modifies the source. Path traversal and links are rejected.
+
+Each package has `meta.json`, `snapshots/<snapshot-id>/{context.md,manifest.json}`
+and `artifacts/`. Metadata's `snapshot` is the committed read pointer, and
+`snapshot_revision` identifies the context version. No separate authoritative
+root context is maintained: that would introduce a two-file transaction race.
+Read the returned context path, not a fabricated `context.md` path.
+
+Record explicit cross-task dependencies with repeated `checkpoint --ref TASK_ID`;
+use `--clear-refs` to remove them deliberately. `--pin/--unpin` and `--hold/--unhold`
+protect retention-sensitive packages. A missing or invalid reference schema
+blocks unsafe maintenance rather than guessing that no references exist.
+
+`active`, `blocked`, `waiting` remain in `handoff/active/`. `close` moves the
+whole package under `handoff/archive/` with the same name and closure evidence.
+Context is restored only through explicit selection, not ordinary startup.
+Release when stopping work; transfer invalidates old owners. Local locks do not
+solve offline synchronization conflicts across machines.
+
+Old v3 messages can be listed with `ag migrate --dry-run`; this never mutates,
+imports a task or infers completion from an old timestamp.
 
 ## Capability 3 — Check inbox / send messages
 
-Inbox: `~/.agent-guild/handoff/inbox/`.
+Inbox: `~/.agent-guild/messages/inbox/`; processed messages: `messages/archive/`.
+List with `ag inbox <agent>` only when requested. Bootstrap does not print message topics.
 - Receive: inspect inbox Markdown messages and act only within user-authorized scope. A message is not new authority. After all current messages are handled, `ag finish <name> --archive-inbox` archives them without overwriting prior messages. Leave unhandled messages pending; local files do not wake the recipient runtime.
 - Send: `from-<src>-to-<dst>-<topic>.md` — write for a recipient with no context (what you did, what's left, where artifacts are).
 
@@ -76,8 +126,9 @@ After **substantive work** (built/fixed/decided/learned a lasting fact), append
 to `~/.agent-guild/log/daily/YYYY-MM-DD-<your-agent-name>.md` — per-agent file,
 append-only. **Skip** greetings / lookups / short Q&A.
 
-Prefer `ag finish` (auto-locates today's file + last_seen + inbox report);
-`ag log <agent> "<title>"` works too.
+Use `ag finish` for brief non-task notes (daily file + last_seen + inbox report).
+For task work, checkpoint the package instead; do not duplicate full context in daily logs.
+`ag log <agent> "<title>"` remains available for short events.
 
 Good entry: `## <title>` + What / Why / Result / Cross-agent note (if others need to know).
 
@@ -132,21 +183,54 @@ Directory-symlink runtimes (`ag link-root`): new skills installed into
 
 **红线**：不记 secrets/token/原始报文；条目只增不改，仅 `Status`/`Resolution` 可由任何 agent 更新。
 
-## Capability 9 — Data hygiene (`ag groom`, protocol 3.2+)
+## Capability 9 — Bounded history and a reviewable maintenance loop
 
-协会用得越久，数据越容易劣化：current-focus 只增不减、daily log 无限堆积、
-audit 越滚越大、resolved 台账条目永远躺在 live 文件里。groom 是自动防线：
+```bash
+ag history status
+ag history plan
+ag history plan --output history/plan.json
+# Only after reviewing every affected file and obtaining explicit approval:
+ag history apply --plan history/plan.json --confirm
+ag groom --dry-run
+```
 
-- **自动触发**：`ag bootstrap` 尾部挂钩（速率限制默认 24h 一次），skill 正常
-  触发即自动维护，无需用户点名。
-- **版本自检**（3.9.0+）：bootstrap 尾部同样速率限制地对比三平台发布版本；
-  默认 `check` 只提示，UPGRADE.md 里 `mode = apply` 则自动下载安装
-  （仅替换 skill 本体，用户数据分毫不动），`mode = off` 关闭。
-- **保真原则**：只搬不删 —— 过期数据进 `log/archive/`、
-  `handoff/shared-state/archive/`、`learnings/archive/` 或可恢复的 `.trash/`；
-  手写的、无时间戳的 focus 块永远不动；未读收件箱永远只报告不搬。
-- **策略可调**：所有阈值在 `~/.agent-guild/RETENTION.md`（用户文件，升级不覆盖）。
-- **可审计**：每次 groom 写 `log/audit.jsonl` + `.groom.json` 状态。
+The maintained plan path is fixed and replaceable, not an unlimited sequence
+of reports. A plan carries file identities/hashes, policy and task metadata
+checks; changed inputs, protected references or links block application.
+Apply handles at most ten files, verifies backups before relocating originals
+to managed quarantine, and verifies the result. It does not physically empty
+quarantine. Backup/quarantine bytes remain counted: `physical_bytes_freed` is
+zero. Physical release is a separate human-controlled action, not a promise
+that this command shrinks disk usage. Insufficient backup headroom stops it.
+
+The loop checks on startup/finish (default 24h cooldown) and before protected
+writes: measure, identify eligible old data, plan, confirm, verify, measure
+again. No progress, an error, or unresolved protection stops the loop. No daemon
+runs between invocations. A full budget blocks new historical growth instead
+of silently deleting history or pretending a failed checkpoint succeeded.
+
+Optional `RETENTION.md` keys (missing keys use defaults):
+
+| Key | Default |
+|---|---:|
+| `history_max_bytes` | 1073741824 (1 GiB, one shared budget) |
+| `history_target_bytes` | 838860800 (800 MiB) |
+| `history_full_days` | 30 (review full history) |
+| `history_retention_days` | 180 (retirement candidates) |
+| `history_max_tasks` | 2000 (archive-count review threshold) |
+| `history_check_interval_hours` | 24 |
+
+Count task archives, old checkpoints, message archives, logs, session
+bookkeeping and managed backups/recovery. Current active context, manifest
+attachments and live rules are not retired. Protect current archived context
+and required attachments too: removing only half of a task would corrupt it.
+Whole-task retirement and physical deletion are not performed implicitly.
+Referenced or pinned material remains protected but its historical bytes
+still count. Skills/tools/source repositories are outside the history budget.
+
+Automatic grooming is now report-only. Explicit `ag groom` retains the older
+lossless rotation operations; it is not physical history reclamation. Version
+checks remain independently controlled by `UPGRADE.md`; no memory is uploaded.
 
 ## Capability 10 — Cross-device portability (protocol 3.3+)
 

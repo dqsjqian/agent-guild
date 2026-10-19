@@ -63,7 +63,7 @@ def build_guild():
         "# Universal rules\n\n- Brew coffee slowly, never rush.\n", encoding="utf-8")
     (ag.CENTRAL / "memory/shared/notes.md").write_text(
         "# Shared notes\n\nTea goes into memory/shared.\n", encoding="utf-8")
-    (ag.CENTRAL / "handoff/archive/from-cara-to-alice-old.md").write_text(
+    (ag.CENTRAL / "messages/archive/from-cara-to-alice-old.md").write_text(
         "an archived kerfluffle\n", encoding="utf-8")
     (ag.CENTRAL / "registry.json").write_text(json.dumps({
         "protocol_version": "3.3", "central_dir": "~/.agent-guild/",
@@ -76,7 +76,7 @@ def build_guild():
 def main():
     # -- _session_path: relative -> central, write pre-creates parents -------
     check("session path resolves under central",
-          ag._session_path("handoff/archive"), ag.CENTRAL / "handoff/archive")
+          ag._session_path("messages/archive"), ag.CENTRAL / "messages/archive")
     deep = ag._session_path("log/decisions/a/b", write=True)
     check("session path write makes parents", deep.parent.is_dir(), True)
     check("session path absolute passthrough",
@@ -99,13 +99,27 @@ def main():
         return {str(p.relative_to(ag.CENTRAL)): p.read_bytes()
                 for p in ag.CENTRAL.rglob("*") if p.is_file()}
 
+    # Background startup must not read any task-bearing files, even if the
+    # same workspace or agent had unfinished work in another conversation.
+    private_sources = [ag.CENTRAL / "projects/active.md",
+                       ag.CENTRAL / "handoff/shared-state/current-focus.md",
+                       ag.host_dir() / ag.HOST_NOTES]
+    for source in private_sources:
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text("UNRELATED_TASK_CONTEXT_MUST_NOT_LOAD", encoding="utf-8")
+    original_read = Path.read_text
+    def guarded_read(path, *args, **kwargs):
+        if path in private_sources:
+            raise AssertionError("bootstrap read unrelated task context")
+        return original_read(path, *args, **kwargs)
     before = snapshot()
-    with mock.patch.object(ag, "maybe_auto_groom") as groom, \
+    with mock.patch.object(Path, "read_text", guarded_read), \
+            mock.patch.object(ag, "maybe_auto_groom") as groom, \
             mock.patch.object(ag, "maybe_auto_upgrade") as upgrade:
         code, out = run(ag.cmd_bootstrap, ["alice", "--no-maintenance"])
     check("bootstrap without maintenance exit", code, 0)
     check("bootstrap without maintenance still reads context",
-          "5/5 context files loaded" in out, True)
+          "3/3 context files loaded" in out, True)
     check("bootstrap without maintenance skips grooming", groom.called, False)
     check("bootstrap without maintenance skips upgrade checks", upgrade.called, False)
     check("bootstrap without maintenance leaves guild unchanged", snapshot() == before, True)
@@ -114,8 +128,10 @@ def main():
     code, out = run(ag.cmd_bootstrap, ["alice"])
     check("bootstrap exit", code, 0)
     check("bootstrap shows profile", "WHO THE USER IS" in out, True)
-    check("bootstrap shows focus", "CURRENT FOCUS" in out, True)
-    check("bootstrap shows all 5 files", "5/5 context files loaded" in out, True)
+    check("bootstrap excludes focus", "CURRENT FOCUS" in out, False)
+    check("bootstrap excludes projects", "ACTIVE PROJECTS" in out, False)
+    check("bootstrap shows only 3 background files", "3/3 context files loaded" in out, True)
+    check("bootstrap explains opt-in", "Task context: not loaded" in out, True)
     check("bootstrap hints recall/finish",
           "ag recall" in out and "ag finish" in out, True)
 
@@ -147,10 +163,10 @@ def main():
     code, _ = run(ag.cmd_recall, ["coffee", "--limit", "many"])
     check("recall bad limit exit", code, 2)
 
-    code, out = run(ag.cmd_recall, ["kerfluffle"])  # handoff/archive is searched
-    check("recall searches handoff/archive", code, 0)
+    code, out = run(ag.cmd_recall, ["kerfluffle"])  # messages/archive is searched
+    check("recall searches messages/archive", code, 0)
     check("recall archive hit",
-          "handoff/archive/from-cara-to-alice-old.md:1: an archived kerfluffle"
+          "messages/archive/from-cara-to-alice-old.md:1: an archived kerfluffle"
           in out, True)
 
     # -- finish: session close-out -------------------------------------------
@@ -178,7 +194,7 @@ def main():
           (ag.CENTRAL / "log/daily" / f"{day}-ghost.md").is_file(), True)
 
     # inbox: report-only by default, archived only when asked (SPEC 3.6)
-    msg = ag.CENTRAL / "handoff/inbox/from-bob-to-alice-report.md"
+    msg = ag.CENTRAL / "messages/inbox/from-bob-to-alice-report.md"
     msg.write_text("please review", encoding="utf-8")
     code, out = run(ag.cmd_finish, ["alice"], stdin="second pass")
     check("finish reports pending inbox",
@@ -189,11 +205,11 @@ def main():
                     stdin="third pass")
     check("finish archive exit", code, 0)
     check("finish archives inbox message",
-          (ag.CENTRAL / "handoff/archive/from-bob-to-alice-report.md").is_file(),
+          (ag.CENTRAL / "messages/archive/from-bob-to-alice-report.md").is_file(),
           True)
     check("finish empties inbox", msg.exists(), False)
     check("finish archive reported",
-          "archived 1 inbox message(s) -> handoff/archive/" in out, True)
+          "archived 1 inbox message(s) -> messages/archive/" in out, True)
 
     # Real sends create persistent lock sidecars. They are not messages and
     # must not move with an archive, or a concurrent sender can lose its lock.
@@ -204,13 +220,15 @@ def main():
     sent_path = sent[0]
     sidecar = sent_path.with_name(f".{sent_path.name}.ag-lock")
     code, out = run(ag.cmd_bootstrap, ["alice"])
-    inbox_output = out.split("== INBOX for alice", 1)[1].split("Other rules", 1)[0]
-    check("bootstrap hides inbox lock sidecars", ".ag-lock" in inbox_output, False)
+    check("bootstrap hides message filenames", sent_path.name in out, False)
+    code, inbox_output = run(ag.cmd_inbox, ["alice"])
+    check("explicit inbox lists message", sent_path.name in inbox_output, True)
+    check("explicit inbox hides lock sidecars", ".ag-lock" in inbox_output, False)
     code, out = run(ag.cmd_finish, ["alice", "--archive-inbox"], stdin="first batch")
     check("finish counts actual messages only",
           "archived 1 inbox message(s)" in out, True)
     check("finish leaves inbox lock in place", sidecar.is_file(), True)
-    archive = ag.CENTRAL / "handoff/archive"
+    archive = ag.CENTRAL / "messages/archive"
     first_archive = archive / sent_path.name
     check("first archived body", first_archive.read_text(encoding="utf-8"),
           "first message\n")

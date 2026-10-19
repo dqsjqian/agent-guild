@@ -5,7 +5,7 @@
 [English](README_EN.md) | **中文**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/dqsjqian/agent-guild/blob/main/LICENSE)
-[![Protocol](https://img.shields.io/badge/protocol-v3.3-green)](references/SPEC.md)
+[![Protocol](https://img.shields.io/badge/protocol-v4.0-green)](references/SPEC.md)
 
 Agent Guild 面向**同一用户使用的多个、受信任且能够读写本地文件的 AI 助手**。
 它把共享上下文放进 `~/.agent-guild/` 的 Markdown / JSON 文件：你能查看、修改、备份，
@@ -26,13 +26,25 @@ Agent Guild 面向**同一用户使用的多个、受信任且能够读写本地
 长期偏好和项目约定放在身份、规则或共享记忆中；`log/daily/` 记录会话经过，不代替长期记忆。
 助手仍需按协议读取相关上下文，Agent Guild 不会自动把所有历史塞进每一次回答。
 
+## 跨会话接班：先问待办，再选任务
+
+1. A 做到一半：保存独立任务包（日期 + 随机 ID + 短标题），包括完整上下文、JSON、脚本、图片与验证材料。
+2. 打开 B 做其他事：不加载 A 的任务。默认启动只读身份、日常习惯与通用规则。
+3. 问 B“我有哪些事没做完？”：只列元信息，生成该会话独立的序号快照。
+4. 选择“继续第 2 个”：核对列表版本与任务所有权后，只读这一项。A 仍在处理则先确认转交或协作。
+5. 任务验收闭环：整个目录由 `handoff/active/` 进入 `handoff/archive/`，移出待办；对话结束不等于任务结束。
+
+版本检查拒绝迟到写入；接管会撤销旧会话写权。没有宿主结束钩子时，恢复保证仅到最近成功检查点。
+任务上下文不是新的执行授权，附件脚本不会自动执行。历史迁移用 `ag migrate --dry-run` 预览；
+旧焦点和消息不会自动猜成待办，旧数据不会在升级时被移动或删除。
+
 ## 适合谁，有哪些边界
 
 | 你的需求 | Agent Guild 的做法 |
 |---|---|
 | 经常切换两个或更多本地助手，不想重复交代约定 | 共享身份、规则、项目状态和可检索的记忆文件 |
 | 想看清助手记了什么，并自行修正 | 使用普通 Markdown / JSON 文件，不依赖专有数据库 |
-| 想交接未完成的工作 | 共享当前焦点、收件箱和当日日志；接收方读取后继续 |
+| 想交接未完成的工作 | 每个任务一个目录；问待办只列元信息，选择后才恢复该任务 |
 | 想把个人工作上下文搬到另一台设备 | 区分共享、平台和本机信息；文件搬运由你选择 |
 | 还想统一 skills、工具及其数据位置 | 可选择完整共享中心模式；无需为了试用记忆而先迁移这些资产 |
 
@@ -94,7 +106,7 @@ python3 agent-guild-source/scripts/ag.py init demo-agent
 - **记忆内容**：身份、规则和项目文件由用户控制。助手只记录任务所需的摘要；不要把密码、token 等凭据写进共享记忆。
 - **网络与更新**：安装需要下载文件。运行时默认在 `bootstrap` 后按设备最多每 24 小时检查一次三个公开版本源，不上传记忆内容。`UPGRADE.md` 中 `mode = check` 只提示，`mode = apply` 会下载并安装新版本，`mode = off` 关闭自动检查；手动 `upgrade` 仍可使用。
 - **只查看上下文**：`bootstrap <agent> --no-maintenance` 跳过本次自动整理和升级检查，不改变已有策略。
-- **自动归档**：`bootstrap` 默认按设备每 24 小时尝试一次 groom，将过期日志、焦点及已解决台账搬到归档，轮转审计；未读消息只报告。先用 `groom --dry-run` 看计划，保留期限在 `RETENTION.md` 调整。归档不等于删除，也不会缩小整个目录的历史总量。
+- **有界历史**：默认统一 1 GiB 预算、800 MiB 回落目标，计入归档、旧检查点、日志及受管备份/回收。启动与收尾限频检查，不自动删文件。`history status` 查容量，`history plan` 生成待审核清单；实际处理要求显式确认。受保护内容或备份空间不足时停止新增历史并报错，不绕过预算。保留期限在 `RETENTION.md` 配置，年龄只生成候选，不代表自动删除授权。
 - **共享范围**：`memory/<agent>/` 和 `private/` 是组织约定，不是权限或加密边界。能访问这些文件的程序仍可能读取它们；加入的助手应当是你信任的。
 - **模型与备份**：数据文件由 Agent Guild 保存在本机。助手读取后是否发送给模型服务，取决于该助手的运行方式；你选择的同步、备份工具也有自己的数据处理行为。
 
@@ -103,7 +115,7 @@ python3 agent-guild-source/scripts/ag.py init demo-agent
 
 ## 日常维护与升级
 
-可以直接对已接入的助手说：“记住这个项目约定”“查一下上次的决定”“更新当前焦点”或“整理协会”。
+可以直接对已接入的助手说：“记住这个项目约定”“查一下上次的决定”“我有哪些待办”，再选择清单中的任务。新会话不会自动继续其他会话的工作。
 完整命令见 [能力参考](references/CAPABILITIES.md)。CLI 的写入和检查都发生在调用时，不在后台运行。
 
 检查、应用本项目的版本更新：
@@ -124,7 +136,9 @@ Windows 使用 `python` 和 `$env:USERPROFILE` 对应路径。也可以重跑安
 ├── identity/ rules/ projects/     用户身份、约定、项目状态
 ├── memory/shared/                跨助手的长期事实及 INDEX.md
 ├── memory/<agent>/               按助手组织的记忆
-├── handoff/                      当前焦点、收件箱、归档
+├── handoff/active/               未闭环任务包（元信息、快照、附件）
+├── handoff/archive/              整包归档的已闭环任务
+├── messages/inbox/ archive/      独立的 agent 间消息
 ├── log/ learnings/               会话日志、纠正与经验台账
 ├── hosts/<host-id>/              本机路径、平台和安装状态
 ├── skills/agent-guild/           Agent Guild 运行时 skill

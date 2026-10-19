@@ -7,6 +7,7 @@ import importlib.util
 import io
 import json
 import os
+import sys
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -28,6 +29,9 @@ class InitVersionTests(unittest.TestCase):
         spec = importlib.util.spec_from_file_location(
             "ag_init_test", Path(__file__).with_name("ag.py"))
         self.ag = importlib.util.module_from_spec(spec)
+        modules = patch.dict(sys.modules, {spec.name: self.ag})
+        modules.start()
+        self.addCleanup(modules.stop)
         spec.loader.exec_module(self.ag)
         self.source = self.root / "source"
         self.installed = self.ag.CENTRAL / "skills/agent-guild"

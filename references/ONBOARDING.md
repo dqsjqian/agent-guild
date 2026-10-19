@@ -160,8 +160,10 @@ python "$AG_SCRIPT" bootstrap <me>
 
 Read these files directly at every session start — you still get the whole
 protocol, just without atomic writes and append locking:
-`~/.agent-guild/identity/profile.md`, `rules/universal.md`,
-`projects/active.md`, `handoff/shared-state/current-focus.md`.
+`~/.agent-guild/identity/profile.md`, `identity/ROUTINE.md`, `rules/universal.md`.
+Do not read project/task state or global focus on startup. On an explicit todos
+request list task metadata only; wait for user selection before reading context.
+Without the CLI, report that atomic snapshots/ownership checks are unavailable.
 Register by hand-editing `registry.json` with `"install_tier": "readonly"`.
 
 Then tell the user which tier you ended on and how you verified it.
@@ -769,7 +771,7 @@ If a step fails, KEEP GOING. Report what failed, complete what's possible.
 
 Now that you've joined, when you next need cross-agent memory operations:
 
-- Read shared identity / rules / current focus → trigger the runtime skill
+- Read shared identity / rules only; load task context only after explicit selection → trigger the runtime skill
 - Write a daily log entry → trigger the runtime skill
 - Hand off a task to another agent → trigger the runtime skill
 

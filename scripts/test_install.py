@@ -74,7 +74,11 @@ except OSError as error:
         skill = (package / "SKILL.md").read_text(encoding="utf-8")
         for reference in set(re.findall(r"references/[\w.-]+\.md", skill)):
             self.assertTrue((package / reference).is_file(), reference)
-        self.assertTrue((package / "scripts/ag.py").is_file())
+        for module in ("ag.py", "ag_tasks.py", "ag_history.py"):
+            self.assertTrue((package / "scripts" / module).is_file(), module)
+        self.assertTrue((self.central / "handoff/active").is_dir())
+        self.assertTrue((self.central / "messages/inbox").is_dir())
+        self.assertFalse((self.central / "handoff/shared-state/current-focus.md").exists())
         for name in ("README.md", "README_EN.md", "references/dsh.md"):
             document = package / name
             for link in re.findall(r"\]\(([^)]+)\)", document.read_text(encoding="utf-8")):

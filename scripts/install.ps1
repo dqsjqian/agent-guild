@@ -42,7 +42,7 @@ $null = & {
         'memory\shared',
         'identity','rules','toolchain','projects','hosts',
         'log\daily','log\decisions','log\archive',
-        'handoff\inbox','handoff\archive','handoff\shared-state'
+        'handoff\active','handoff\archive','messages\inbox','messages\archive'
     )
     foreach ($d in $dirs) {
         $full = Join-Path $Central $d
@@ -78,7 +78,9 @@ $null = & {
     }
     Download-File "$RepoRawUrl/SKILL.md"      (Join-Path $Central 'skills\agent-guild\SKILL.md')      | Out-Null
     Download-File "$RepoRawUrl/manifest.json" (Join-Path $Central 'skills\agent-guild\manifest.json') | Out-Null
-    Download-File "$RepoRawUrl/scripts/ag.py" (Join-Path $Central 'skills\agent-guild\scripts\ag.py') | Out-Null
+    foreach ($module in @('ag.py', 'ag_tasks.py', 'ag_history.py')) {
+        Download-File "$RepoRawUrl/scripts/$module" (Join-Path $Central "skills\agent-guild\scripts\$module") | Out-Null
+    }
     # Remove the pre-3.0 CLI name if upgrading from an older install
     Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $Central 'skills\agent-guild\scripts\ac.py')
 
@@ -98,16 +100,7 @@ $null = & {
     Seed-If-Missing (Join-Path $Central 'toolchain\paths.md')    "$RepoRawUrl/references/examples/toolchain-paths.template.md"
 
     # Initial state files
-    $focusFile = Join-Path $Central 'handoff\shared-state\current-focus.md'
-    if (-not (Test-Path $focusFile)) {
-        @"
-# Current Focus
-
-> Last updated: <date> by <agent-name>
-
-(Empty — no active task. Update this file when you start substantive work.)
-"@ | Set-Content -Path $focusFile -Encoding UTF8
-    }
+    # No global task context is created or automatically injected.
 
     $projFile = Join-Path $Central 'projects\active.md'
     if (-not (Test-Path $projFile)) {

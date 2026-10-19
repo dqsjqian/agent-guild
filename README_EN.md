@@ -5,7 +5,7 @@
 **English** | [中文](README.md)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/dqsjqian/agent-guild/blob/main/LICENSE)
-[![Protocol](https://img.shields.io/badge/protocol-v3.3-green)](references/SPEC.md)
+[![Protocol](https://img.shields.io/badge/protocol-v4.0-green)](references/SPEC.md)
 
 Agent Guild is for **one person using multiple trusted AI assistants with local filesystem access**.
 It stores shared context in Markdown and JSON under `~/.agent-guild/`, so you can inspect, edit,
@@ -28,13 +28,26 @@ Keep lasting preferences and project conventions in identity, rules, or shared m
 `log/daily/` records session history and is not a substitute for lasting memory.
 Assistants still need to read the relevant context; Agent Guild does not inject all history into every answer.
 
+## Cross-session continuation: ask, list, select
+
+A saves a task package containing context, snapshots and attachments. Opening B for unrelated
+work loads no task. Asking B for todos returns metadata only and a session-local numbered
+snapshot. Selecting an item checks its version and ownership before loading that task alone.
+An active owner requires an explicit transfer or collaboration choice. Closure moves the whole
+package from `handoff/active/` to `handoff/archive/`; ending a conversation does not close a task.
+
+Expected revisions reject stale writes, and transfer revokes the previous session's write access.
+There is no universal exit hook: recovery reaches the last successful checkpoint. Context does
+not grant new authority and attached scripts are never executed automatically. Preview legacy
+locations with `ag migrate --dry-run`; upgrades neither infer todos nor move old user data.
+
 ## Where it fits
 
 | Your need | What Agent Guild provides |
 |---|---|
 | Switch between two or more local assistants without repeating conventions | Shared identity, rules, project state, and searchable memory files |
 | See and correct what assistants remember | Ordinary Markdown and JSON, with no proprietary database |
-| Hand off unfinished work | Shared focus, inbox messages, and daily logs for the receiving assistant to read |
+| Hand off unfinished work | One directory per task; list metadata on request and restore only the selected task |
 | Move personal working context to another device | Shared, platform, and host scopes; you choose how to transfer files |
 | Also consolidate skills, tools, and their data | An optional full shared-hub mode; trying memory does not require migrating those assets |
 
@@ -100,7 +113,7 @@ the joining instruction above. Do not clone the source repository directly into 
 - **Memory content:** identity, rules, and project files are user-owned. Assistants should record relevant summaries; keep passwords and tokens out of shared memory.
 - **Network and updates:** installation downloads files. By default, `bootstrap` checks three public version sources at most once per device every 24 hours, without uploading memory content. In `UPGRADE.md`, `mode = check` reports updates, `mode = apply` downloads and installs them, and `mode = off` disables automatic checks. Manual `upgrade` remains available.
 - **Context-only reads:** `bootstrap <agent> --no-maintenance` skips automatic grooming and upgrade checks for that invocation without changing saved policies.
-- **Automatic archiving:** by default, `bootstrap` attempts grooming once per device every 24 hours. It archives expired logs, focus entries, and resolved learning entries, and rotates the audit log; unread messages are only reported. Preview with `groom --dry-run` and adjust retention in `RETENTION.md`. Archiving preserves history and does not reduce the total size of the directory's history.
+- **Bounded history:** one configurable 1 GiB budget, with an 800 MiB target, covers archives, old checkpoints, logs and managed backups/recovery. Startup and finish run rate-limited checks, not destructive cleanup. Use `history status` and `history plan`, then explicitly approve an exact maintenance plan. If protected data or backup headroom blocks cleanup, new historical growth fails rather than bypassing the limit. Age thresholds create candidates, not deletion authority.
 - **Sharing boundaries:** `memory/<agent>/` and `private/` are organizational conventions, not access controls or encryption. Programs with access to those files may still read them. Connect assistants you trust.
 - **Models and backups:** Agent Guild stores its data files locally. Whether an assistant sends their contents to a model service depends on that assistant's runtime; your chosen backup or sync tool also has its own data handling.
 
@@ -110,7 +123,7 @@ permissions and behavior. See the [security and capability disclosure](reference
 ## Daily use and updates
 
 Ask a connected assistant to “remember this project convention,” “find our previous decision,”
-“update the current focus,” or “groom the guild.” See the [capabilities reference](references/CAPABILITIES.md)
+“what are my todos?”, then select one task. New conversations do not automatically resume other work. See the [capabilities reference](references/CAPABILITIES.md)
 for commands. CLI writes and checks happen when invoked, not in the background.
 
 Check for and apply an update to Agent Guild:
@@ -132,7 +145,9 @@ See the [update procedure](references/ONBOARDING.md#step-7--update-protocol-how-
 ├── identity/ rules/ projects/     Identity, conventions, project state
 ├── memory/shared/                Lasting shared facts and INDEX.md
 ├── memory/<agent>/               Memory organized by assistant
-├── handoff/                      Focus, inbox, archives
+├── handoff/active/               Unfinished task packages
+├── handoff/archive/              Closed task packages, same directory names
+├── messages/inbox/ archive/      Independent agent messages
 ├── log/ learnings/               Session logs, corrections, lessons
 ├── hosts/<host-id>/              Local paths, platform, installation state
 ├── skills/agent-guild/           Agent Guild runtime skill

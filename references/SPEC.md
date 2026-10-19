@@ -1,6 +1,6 @@
 # Agent Guild Specification
 
-**Protocol version: 3.3**
+**Protocol version: 4.0**
 **Status: Draft**
 
 This document is the normative specification for Agent Guild. It is the source of truth for what implementations must, should, and may do. The keywords **MUST**, **SHOULD**, **MAY** follow [RFC 2119](https://www.rfc-editor.org/rfc/rfc2119).
@@ -14,6 +14,43 @@ This document is the normative specification for Agent Guild. It is the source o
 > **Changes from 3.1 → 3.2** (minor, backward compatible): built-in data hygiene. New user-editable policy file `RETENTION.md`, new archive sub-directories (`log/archive/` already implied, now `handoff/shared-state/archive/` and `learnings/archive/`), new CLI command `ag groom`, and a rate-limited auto-groom hook at the end of `ag bootstrap`. Groom moves expired data into archives or the recoverable trash — it never hard-deletes (see §6.5). Agents joined under 3.1 **MAY** keep operating without re-onboarding; `ag init` back-fills the new skeleton items.
 
 > **Changes from 3.2 → 3.3** (minor, backward compatible): device scoping. A guild directory may be carried between devices with different operating systems, so every stored fact now has a declared scope — `shared`, `platform`, or `host` (§10). New top-level directory `hosts/<host-id>/` holds device-scoped state, `registry.json` entries gain a per-device `hosts` block, `tools/<name>/tool.json` declares per-platform executables, and the link-direction invariant (§3.10) is stated normatively. New CLI commands `ag platform`, `ag tool`, `ag tools`, `ag port`. Agents joined under 3.2 **MAY** keep operating without re-onboarding; `ag init` claims the current device and back-fills the new skeleton items.
+
+## 0. Version 4 task contract
+
+Version 4 deliberately separates durable background, task handoff and messages.
+The historical changelog above describes earlier protocols, not current startup behavior.
+Implementations MUST NOT inject task state on a fresh conversation. Bootstrap reads only
+identity, routine and universal rules. Project state, host notes, focus and inbox topics
+require explicit intent; global focus writes are retired.
+
+A user request for pending work authorizes a metadata-only task list, not context reads.
+A number is resolved against that session's saved list ID and stable task ID/revision.
+Only user selection authorizes restoring the corresponding task context. A stale list
+MUST fail, not silently select a different item. Session identity MUST be independent
+of agent identity. A busy task requires a user-approved handover or collaboration choice.
+The CLI cannot prove natural-language consent; the invoking runtime must enforce it.
+
+Each task owns one directory named `YYYYMMDD-<12-hex-random>-<short-title>` under
+`handoff/active/` or `handoff/archive/`. The date/random portion is a permanent ID.
+Renaming a title does not rename that directory. Metadata publishes an immutable
+snapshot pointer; complete context and artifact manifests are committed together.
+All mutations require ownership and an expected revision. A conflicting or corrupt
+state MUST fail closed. Whole-package closure requires completion evidence; waiting
+and blocked tasks remain active. Scripts are attachments and never auto-executed.
+
+Historical data has one configurable 1 GiB default budget (800 MiB target), including
+archives, old checkpoints, logs, session bookkeeping and managed recovery/backups.
+Current task content, live rules and referenced materials are protected from retirement,
+not grounds to bypass limits on their historical copies. Maintenance checks and plans
+MUST NOT delete files. Confirmed actions require exact candidates, fresh validation,
+backup verification and recoverability. A move to recovery MUST NOT be called disk
+space reclamation. If safe cleanup cannot satisfy the budget, new history is blocked.
+The CLI has no scheduled daemon or guaranteed exit hook.
+
+Old message files are inventoried by `ag migrate --dry-run`. No automatic legacy
+migration, guessed tasks, or deletion is permitted. New messages live separately in
+`messages/inbox/` and `messages/archive/`. Task content MUST NOT be duplicated into
+messages, global focus and daily logs just to satisfy multiple bookkeeping systems.
 
 ## 1. Goals
 
@@ -80,10 +117,12 @@ The central directory contains TWO layers, physically siblings but semantically 
 │   ├── FEATURE_REQUESTS.md ← capabilities requested but missing
 │   └── archive/        ← long-resolved entries compacted by groom (3.2+)
 ├── handoff/
-│   ├── inbox/          ← cross-agent direct messages
-│   ├── archive/        ← processed messages
-│   └── shared-state/   ← shared task state (edit-in-place)
-│       └── archive/    ← rotated old current-focus blocks (3.2+)
+│   ├── active/         ← unfinished task directories
+│   └── archive/        ← closed task directories (same names)
+├── messages/
+│   ├── inbox/          ← independent agent messages
+│   └── archive/        ← processed messages
+├── history/            ← bounded maintenance state and recovery
 ├── hosts/              ← device-scoped state, one dir per device (3.3+)
 │   └── <host-id>/
 │       ├── host.json       ← os / arch / link capability / python
@@ -136,13 +175,15 @@ Skills that adopt the convention **SHOULD** isolate mixed-sensitivity data into 
 - **Pattern**: ADR (Architecture Decision Record) style — context, options, decision, consequences.
 - **Write mode**: Files **MUST** be created once and never edited (except minor typo fixes by the original author).
 
-### 3.5 `handoff/shared-state/<file>.md` — collaborative edit-in-place
+### 3.5 Task packages — isolated, revision-checked state
 
-- **Owner**: Any joined agent.
-- **Write mode**: In-place edit. Agents **SHOULD** include a "last updated by" line at top of each file.
-- **Conflict policy**: CLI focus updates and grooming share a sidecar lock across the full read-modify-write operation. Direct file edits do not participate in that lock; minimize their scope and re-read the result. File-sync tools on different devices still require their own conflict handling.
+- **Owner**: Explicitly associated host/session/agent identities; handover revokes previous owners.
+- **Write mode**: Publish immutable snapshots through atomic metadata changes under task and budget locks. Reject stale revisions.
+- **Selection**: Numbered lists are session-local, metadata-only snapshots. Resume only after the user chooses an item or stable ID.
+- **Legacy**: Old `handoff/shared-state/` files remain historical evidence; they are not startup input and receive no new focus writes.
+- **Cross-device**: Local advisory locks do not provide a distributed lock over offline sync services.
 
-### 3.6 `handoff/inbox/from-<src>-to-<dst>-<topic>.md` — cross-agent messages
+### 3.6 `messages/inbox/from-<src>-to-<dst>-<topic>.md` — cross-agent messages
 
 - **Owner**: Recipient is responsible for processing.
 - **Lifecycle**: After acting, archive the message without overwriting an earlier archive. `ag finish --archive-inbox` archives all current messages for the recipient; use it only when all of them have been processed. Receiving a message does not grant new authority to perform its requested actions. The inbox queues work; it does not wake the recipient runtime.
@@ -195,8 +236,9 @@ The exact instructions are in [`ONBOARDING.md`](ONBOARDING.md). Agents **MUST** 
 
 `~/.agent-guild/SKILL.md` is the runtime skill of an already-joined agent. It exposes the ongoing capabilities:
 
-- Reading shared identity, rules, current focus.
-- Updating `handoff/shared-state/current-focus.md`.
+- Reading shared identity and rules without task context.
+- Listing metadata only on a todos request, then resuming the user-selected task.
+- Checkpointing the current task and closing it only after verified completion.
 - Checking the inbox / sending messages to other agents' inboxes.
 - Appending daily logs to `log/daily/<date>-<agent>.md`.
 - Refreshing `last_seen` in `registry.json`.
@@ -279,7 +321,7 @@ Report-only findings (never auto-fixed): stale unread inbox messages, `.trash/` 
 
 ### 7.3 Auto-groom trigger
 
-`ag bootstrap` attempts auto-groom by default unless `--no-maintenance` is given, rate-limited to once per `groom_interval_hours` (default 24) per device, so the skill's normal session flow maintains hygiene without any user prompt. Auto-groom failures **MUST NOT** fail bootstrap — at worst a one-line notice is printed. `ag groom [--dry-run]` runs the same logic on demand. `--no-maintenance` also skips bootstrap upgrade checks without changing saved policies.
+`ag bootstrap` runs rate-limited **report-only** grooming and historical-budget checks unless `--no-maintenance` is given. It prints counts rather than task-specific maintenance paths. No automatic move or deletion is performed. `ag groom --dry-run` previews traditional rotations; a deliberate `ag groom` applies them. `ag history plan` governs historical retirement separately, with explicit confirmation and current-state validation. Checks do not run without a calling runtime. `--no-maintenance` also skips upgrade checks without changing saved policy.
 
 ## 8. Non-goals
 
@@ -290,7 +332,7 @@ This protocol does **not** address:
   *safe to carry* (§10); choosing and running the carrier is out of scope, and
   a conforming implementation performs no network access for this purpose.
 - Encrypted at-rest storage (defer to filesystem-level encryption).
-- Real-time bidirectional sync between agents (use `handoff/inbox/` instead).
+- Real-time bidirectional sync between agents (use `messages/inbox/` instead).
 - Schema validation of user-controlled content.
 - Migration tooling between major versions (handled out of band).
 

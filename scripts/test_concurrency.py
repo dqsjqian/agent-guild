@@ -136,17 +136,17 @@ class SharedStateTests(unittest.TestCase):
         self.assertEqual(body.count("**Status**: resolved"), 12)
         self.assertEqual(body.count("**Status**: pending"), 4)
 
-    def test_focus_and_groom_preserve_every_block(self):
-        self.path("handoff/shared-state/current-focus.md").write_text(
-            "# Current Focus\n\n> Last updated: 2000-01-01T00:00:00+00:00 by old\n\n"
-            "## old focus\n\nold details\n\n---\n", encoding="utf-8")
-        self.parallel([["focus", "alice", f"focus-{i}"] for i in range(12)]
-                      + [["groom"], ["groom"]])
-        focus_root = self.guild / "handoff/shared-state"
-        body = "\n".join(p.read_text(encoding="utf-8") for p in focus_root.rglob("*.md"))
-        for i in range(12):
-            self.assertEqual(body.count(f"## focus-{i}\n"), 1)
-        self.assertEqual(body.count("## old focus\n"), 1)
+    def test_global_focus_is_retired_without_changing_legacy_data(self):
+        focus = self.path("handoff/shared-state/current-focus.md")
+        focus.write_text("# Current Focus\n\nlegacy details\n", encoding="utf-8")
+        before = focus.read_bytes()
+        result = subprocess.run([sys.executable, str(SCRIPTS / "ag.py"),
+                                 "focus", "alice", "new"], env=self.env,
+                                input="must not write", text=True,
+                                capture_output=True, timeout=20)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("retired", result.stderr)
+        self.assertEqual(focus.read_bytes(), before)
 
     def test_ledger_compaction_preserves_concurrent_learning_entries(self):
         self.path("learnings/LEARNINGS.md").write_text(
@@ -177,8 +177,8 @@ class SharedStateTests(unittest.TestCase):
         self.assertEqual(len(set(ids)), 48)
 
     def test_groom_ignores_lock_sidecars_and_dry_run_is_readonly(self):
-        sidecars = [self.path("handoff/inbox/.from-alice-to-bob-note.md.ag-lock"),
-                    self.path("handoff/archive/.from-alice-to-bob-note.md.ag-lock")]
+        sidecars = [self.path("messages/inbox/.from-alice-to-bob-note.md.ag-lock"),
+                    self.path("messages/archive/.from-alice-to-bob-note.md.ag-lock")]
         for p in sidecars:
             p.touch()
             os.utime(p, (1, 1))

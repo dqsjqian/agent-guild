@@ -30,12 +30,42 @@ or other sync tools. Share only within the user's chosen trust boundary.
 | **Process creation** | `to_trash`, `make_link` | Use the OS instead of reimplementing it: `trash` / `trash-put` / `gio trash` for recoverable deletes, PowerShell's Recycle Bin API on Windows, `cmd /c mklink /J` when symlinks need elevation | A fixed list of OS utilities with argument vectors (never a shell string, never user-supplied commands). No shell interpolation anywhere |
 | **Temporary files** | `atomic_write_json`, `atomic_append`, `_append_lock`, `cmd_focus`, `link_capability`, `cmd_upgrade` | Atomic writes: write to a temp file in the same directory, then `os.replace`. A crash mid-write can never corrupt shared state. Concurrent appends (several agents writing the same daily log or ledger at once) are serialized by an advisory lock on a sidecar `.<name>.ag-lock` file — the lock deliberately does NOT live on the target file, because `os.replace` swaps the inode and a lock on the old inode protects nothing | `tempfile.mkstemp` / `mkdtemp`, cleaned up in `finally` / `trap`. Also used to probe whether this device supports symlinks at all. Lock files are empty (`fcntl.flock` on POSIX, `msvcrt.locking` on Windows), hold no data, and remain next to their target inside `~/.agent-guild/` |
 | **Reading environment variables** | module level, `detect_os`, `host_id` | Configuration and platform detection | `AGENT_GUILD_DIR`, `AG_AGENT`, `AG_HOST_ID`, `AG_PLATFORM`, `APPDATA`, `PREFIX`, `ANDROID_ROOT`. No secrets are read, and nothing read is ever written to a network |
-| **Deleting files** | `to_trash`, `drop_link`, `_replace_tree` | Remove stale links and rotate expired data | **Nothing is ever hard-deleted.** Deletes go to the OS trash or to `~/.agent-guild/.trash/<timestamp>/`. Links are unlinked, never trashed, so a trash helper can never follow one and take the target with it. `shutil.rmtree` is used only on temp/staging directories created in the same run |
+| **Deleting files** | `to_trash`, `drop_link`, `_replace_tree` | Remove stale links and rotate expired data | Task/history maintenance does not physically delete stored history; reviewed files move to managed quarantine. Existing asset/link utilities use OS trash or `~/.agent-guild/.trash/`; links are unlinked without deleting targets. Protocol upgrades replace this skill's installed code directory. Temporary staging and completed transaction journals are removed; private task history is not removed by an upgrade |
 | **Writing files** | everywhere | The guild is a set of Markdown/JSON files | Writes stay inside `~/.agent-guild/`. The only writes outside it are the links an agent asks for during `adopt` / `link-root`, pointing back into the guild, plus the inbound link `port --apply` recreates at a path whose payload it just moved in |
 | **Changing permissions** | `scripts/install.sh`, `scripts/install.ps1` | `chmod +x` on this project's own CLI after download | Applies only to `scripts/ag.py` and `scripts/install.sh` inside the install directory |
 | **Collecting system information** | `platform_facts`, `detect_os`, `detect_arch`, `host_id` | Tell devices apart so one guild directory can be carried between them: OS tag, CPU architecture, hostname, Python version, whether symlinks work | Written to `hosts/<host-id>/host.json` on the local disk and used for local decisions. Never transmitted. `AG_HOST_ID` lets a user replace the hostname with any label they prefer |
-| **Moving / copying files** | `cmd_adopt`, `cmd_link_root`, `cmd_port`, `_groom` | Consolidate selected assets, archive expired data | `adopt`, `link-root` and `port` preview by default; `--apply` executes within the user's selected scope. `groom` applies retention unless `--dry-run`; bootstrap may invoke it automatically unless `--no-maintenance`. Adoption excludes connector stores. Memory-only use requires no asset migration |
-| **Reading files** | `cmd_bootstrap` and friends | Read the user's own shared context: identity, rules, projects, focus, inbox | Reads inside `~/.agent-guild/`, plus the agent home directories listed in `registry.json` when auditing installs |
+| **Moving / copying files** | `cmd_adopt`, `cmd_link_root`, `cmd_port`, `_groom` | Consolidate selected assets, archive expired data | `adopt`, `link-root` and `port` preview by default; `--apply` executes within the user's selected scope. `groom` applies rotations only on explicit manual invocation; bootstrap maintenance is report-only unless `--no-maintenance` skips it. Adoption excludes connector stores. Memory-only use requires no asset migration |
+| **Reading files** | `cmd_bootstrap` and friends | Bootstrap reads only identity/routine/rules; task list reads metadata; user-selected resume reads that task; inbox access is explicit | Reads inside `~/.agent-guild/`, plus the agent home directories listed in `registry.json` when auditing installs |
+
+## Task and history boundaries (protocol 4)
+
+- `ag_tasks.py` accepts explicit task selection and verifies session ownership,
+  revision, metadata, context hashes and attachment hashes. Selection controls
+  what the CLI returns; it is not an OS access-control boundary. A runtime with
+  file access can still read files directly and must follow the consent protocol.
+- Listing returns task metadata only. Budget accounting may read machine
+  manifests and filesystem sizes, never payload bodies. Resuming a selected
+  task reads its complete context and hashes its attachments; it never runs them.
+- Task writes publish immutable revision snapshots and an atomic metadata pointer.
+  Directory transitions carry a recovery journal. Power loss may leave orphaned
+  snapshots or a pending transition; subsequent commands recover or fail closed.
+- Paths reject traversal, links, reparse points and unsupported node types. Use
+  real absolute paths for the guild and attachment sources, not symlink aliases.
+- `ag_history.py` computes a configurable historical budget (default 1 GiB).
+  It includes old checkpoints, session metadata, orphaned task staging and
+  managed recovery. A full budget blocks historical growth; protected items
+  do not grant unlimited storage.
+- `history apply` requires a saved, verified plan and explicit confirmation,
+  handles at most ten files, verifies backups, and relocates only candidates to
+  managed quarantine. It does not invoke a shell or physically delete content.
+  Recovery copies remain counted. Follow host-specific requirements for a
+  second confirmation when no system trash is used. Physical release, semantic
+  summarization/compression, and whole-task retirement remain manual.
+- Historical policy is not a substitute for consent: before any personal-file
+  move, show every affected path and risk, obtain approval, and verify backups.
+  A noninteractive `--confirm` flag cannot authenticate human approval by itself.
+- Maintenance has no daemon. Startup prints aggregate notices, not unrelated
+  task details. Offline multi-device sync is not protected by local file locks.
 
 ## Instruction-shaped text
 
@@ -78,8 +108,9 @@ grep -n -A6 "VERSION_SOURCES" scripts/ag.py
 grep -n "flock\|msvcrt\|ag-lock" scripts/ag.py
 ```
 
-The CLI is a single file with no dependencies, so the audit surface is exactly
-`scripts/ag.py` plus two installer scripts.
+The zero-dependency CLI is split into `scripts/ag.py`, `scripts/ag_tasks.py`
+and `scripts/ag_history.py`, plus two installer scripts. Review all three
+Python modules when auditing storage, selection or retention behavior.
 
 ## Reporting a concern
 
